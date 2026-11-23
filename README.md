@@ -53,11 +53,15 @@ Synapse is the factory's only hands.
 ## Architecture
 
 ```
-ui/            Mission-control web UI (org chart, job board, bid ticker,
-               ledger + narration feeds) — REST snapshots + SSE events.
-               Vanilla JS, no build step; Modern Web Guidance applied
-               (native <dialog>, Baseline-safe CSS with fallbacks, ARIA
-               live regions, reduced-motion support).
+ui-next/       Primary mission-control UI — Next.js + React + TypeScript
+               (org chart, job board, bid ticker, ledger + narration feeds,
+               payroll dialog) — REST snapshots + SSE events. GSAP motion,
+               Lottie badges, and a lightweight Canvas floor strip (no heavy
+               3D). Run: cd ui-next && npm install && npm run dev (:3000).
+ui/            Zero-dependency fallback of the same UI. Vanilla JS, no
+               build step; Modern Web Guidance applied (native <dialog>,
+               Baseline-safe CSS with fallbacks, ARIA live regions,
+               reduced-motion support). Served by the API on :8000.
 api/           FastAPI — REST state endpoints, SSE event bus, run/reset.
 orchestrator/  Shift loop: Manager, bidding, worker execution, review,
                blind appeal. LLM narration via Groq is optional — the
@@ -100,6 +104,8 @@ uvicorn api.main:app --port 8000
 
 # 4. Open http://localhost:8000, click "Run Shift", watch the floor work.
 #    "Reset Demo" restores the exact demo-start state.
+#    Primary UI (optional): cd ui-next && npm install && npm run dev
+#    → http://localhost:3000 (same API, richer mission-control).
 ```
 
 Headless check of the economy core:
