@@ -1,0 +1,201 @@
+/* THE FLOOR — Mission Control styles.
+   Organised in cascade layers (Baseline Widely Available): token changes
+   live in `tokens`, component tweaks never fight utilities, and the
+   reduced-motion overrides sit in the last layer so they always win. */
+
+@layer tokens, base, components, utilities, motion;
+
+@layer tokens {
+  :root{
+    color-scheme: dark; /* themed native scrollbars/controls, no white flash */
+    --bg:#0b0e14; --panel:#12161f; --panel2:#171c28; --line:#232a3a;
+    --text:#e6eaf2;
+    /* Secondary text lifted from #8b94a7 (5.6:1) to #a3adc0 (>=6.8:1 on every
+       surface) — small labels must stay legible, not just pass. */
+    --muted:#a3adc0;
+    --accent:#4da3ff; --green:#3fb97f; --amber:#d9a13b;
+    --pink:#ec7dab;
+    /* --red is for borders and fills; --red-bright is the text-safe variant
+       (>=5.5:1 on every surface); --red-deep carries white text (>=5:1). */
+    --red:#e5534b; --red-bright:#f0766e; --red-deep:#c62f28;
+    --chip:#1d2434;
+    --focus:#7db8ff;
+  }
+}
+
+@layer base {
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100vh}
+  code{background:var(--chip);padding:1px 5px;border-radius:4px;font-size:12px}
+  ::selection{background:var(--accent);color:#06121f}
+
+  /* One visible focus style for every interactive element (keyboard only,
+     via :focus-visible — no ring on mouse click). */
+  :focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+
+  .skip-link{position:absolute;left:12px;top:-48px;z-index:100;background:var(--accent);color:#06121f;
+    font-weight:700;padding:10px 16px;border-radius:0 0 8px 8px;text-decoration:none;transition:top .15s ease-out}
+  .skip-link:focus-visible{top:0}
+}
+
+@layer components {
+  /* Header */
+  #topbar{display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+  .logo{font-size:22px;font-weight:800;letter-spacing:2px;margin:0}
+  .tagline{color:var(--muted);font-size:12px;font-style:italic;margin:0}
+  .stats{display:flex;gap:18px;flex-wrap:wrap;margin:0 0 0 auto;padding:0}
+  .stat{display:flex;flex-direction:column;min-width:64px;min-inline-size:0}
+  .stat-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+  .stat-value{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;margin:0}
+  .stat-value.conn{font-size:12px;color:var(--amber)}
+  .stat-value.conn.ok{color:var(--green)}
+  .stat-value.conn.ok::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);margin-right:6px;vertical-align:1px}
+  .actions{display:flex;gap:8px}
+  .btn{border:1px solid var(--line);border-radius:8px;padding:9px 16px;min-height:44px;display:inline-flex;align-items:center;
+    font-size:14px;font-weight:600;cursor:pointer;background:var(--panel2);color:var(--text);touch-action:manipulation}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#06121f}
+  .btn-primary:hover{filter:brightness(1.12)}
+  .btn-primary:disabled{opacity:.55;cursor:wait}
+  .btn-ghost:hover{border-color:var(--muted);background:var(--chip)}
+  .btn:active{transform:translateY(1px)}
+
+  /* Payroll banner */
+  .payroll-banner{background:var(--red-deep);color:#fff;text-align:center;font-weight:800;letter-spacing:3px;padding:8px;font-size:15px;animation:bannerflash .5s ease-in-out 6 alternate}
+  @keyframes bannerflash{from{opacity:1}to{opacity:.55}}
+
+  /* Waiting state */
+  .waiting{display:flex;justify-content:center;padding:28px 14px 4px}
+  .waiting-card{max-width:640px;background:var(--panel);border:1px dashed var(--amber);border-radius:12px;padding:22px 26px;text-align:center}
+  .waiting-card h2{margin:0 0 8px;color:var(--amber);text-wrap:balance}
+  .waiting-card p{color:var(--muted);margin:6px 0}
+  .waiting-sub{font-size:12px}
+
+  /* Layout — full width, slim gutter */
+  #layout{display:grid;grid-template-columns:340px 1fr 340px;gap:14px;padding:14px;align-items:start}
+  @media (max-width:1200px){#layout{grid-template-columns:1fr 1fr}}
+  @media (max-width:760px){#layout{grid-template-columns:1fr}}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;min-height:200px;scroll-margin-top:84px}
+  .panel-title{margin:2px 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted)}
+  .sub-title{margin:16px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted)}
+  .empty{color:var(--muted);font-size:13px}
+
+  /* Agent cards */
+  .mgmt-row{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+  .mgmt-row:empty{display:none}
+  .agent-grid{display:flex;flex-direction:column;gap:10px}
+  .agent-card{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:11px 12px;position:relative;transition:opacity .4s}
+  .agent-card .row1{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .agent-name{font-weight:700;font-size:15px;overflow-wrap:anywhere}
+  .badge{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:var(--chip);border:1px solid var(--line);border-radius:20px;padding:2px 8px;color:var(--muted)}
+  .badge.tier{color:var(--accent)}
+  .agent-meta{color:var(--muted);font-size:12px;margin-top:2px;overflow-wrap:anywhere}
+  .rep-wrap{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .rep-bar{flex:1;height:8px;background:#0d1119;border-radius:6px;overflow:hidden;border:1px solid var(--line)}
+  .rep-fill{height:100%;background:var(--green);transition:width .5s}
+  .rep-fill.mid{background:var(--amber)} .rep-fill.low{background:var(--red)}
+  .rep-num{font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+  .agent-foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px}
+  .balance{font-weight:800;font-variant-numeric:tabular-nums}
+  .balance.neg{color:var(--red-bright)} .balance.pos{color:var(--green)}
+  .chip{font-size:11px;font-weight:700;border-radius:20px;padding:3px 10px;background:var(--chip);border:1px solid var(--line);text-transform:uppercase;letter-spacing:.5px}
+  .chip.working,.chip.bidding{color:var(--amber);border-color:var(--amber)}
+  .chip.in_review,.chip.review{color:var(--accent);border-color:var(--accent)}
+  .chip.fired{color:#fff;background:var(--red-deep);border-color:var(--red-deep)}
+  .chip.idle{color:var(--muted)}
+  .current-job{margin-top:7px;font-size:12px;color:var(--muted);border-top:1px dashed var(--line);padding-top:6px}
+  .current-job code{color:var(--accent)}
+  .mutation-note{margin-top:7px;font-size:12px;color:var(--pink);font-style:italic}
+  .agent-card.fired{opacity:.55}
+  .agent-card.fired .agent-name{text-decoration:line-through}
+  .agent-card.shake{animation:shake .6s}
+  @keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}
+  .agent-card.newhire{animation:newhire 1.6s ease-out}
+  @keyframes newhire{0%{box-shadow:0 0 0 0 rgba(236,125,171,0);transform:translateY(-8px)}30%{box-shadow:0 0 0 3px var(--pink)}100%{box-shadow:0 0 0 0 transparent;transform:translateY(0)}}
+  .stamp{position:absolute;top:10px;right:10px;color:var(--red-bright);border:2px solid var(--red);border-radius:6px;padding:2px 8px;font-weight:800;letter-spacing:1px;transform:rotate(8deg);font-size:12px;background:rgba(11,14,20,.75)}
+  .graveyard{display:flex;flex-direction:column;gap:8px;border-top:1px dashed var(--line);padding-top:10px}
+
+  /* Job board */
+  .ticker{background:#0d1119;border:1px solid var(--line);border-radius:8px;overflow:hidden;padding:7px 10px;margin-bottom:12px;white-space:nowrap}
+  .ticker-track{display:inline-flex;gap:36px;padding-left:12px;will-change:transform}
+  .ticker-track.scrolling{animation:tick 30s linear infinite}
+  /* A moving ticker next to readable content must be pausable. */
+  .ticker:hover .ticker-track.scrolling,.ticker:focus-within .ticker-track.scrolling{animation-play-state:paused}
+  @keyframes tick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+  .ticker-item{font-size:13px;font-variant-numeric:tabular-nums}
+  .ticker-item b{color:var(--accent)}
+  .ticker-item.muted{color:var(--muted)}
+  .job-board{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+  @media (max-width:900px){.job-board{grid-template-columns:repeat(2,1fr)}}
+  @media (max-width:520px){.job-board{grid-template-columns:1fr}}
+  .job-col{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px;min-height:120px;min-width:0}
+  .job-col h3{margin:0 0 9px;font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);text-align:center}
+  .job-card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:8px;
+    content-visibility:auto;contain-intrinsic-size:auto 110px}
+  .job-card .job-title{font-weight:700;font-size:13px;overflow-wrap:anywhere}
+  .job-card .job-meta{color:var(--muted);font-size:12px;margin-top:2px}
+  .job-card .job-budget{font-weight:800;color:var(--amber);font-variant-numeric:tabular-nums}
+  .bid-stack{margin-top:7px;border-top:1px dashed var(--line);padding-top:6px;display:flex;flex-direction:column;gap:3px}
+  .bid-line{font-size:12px;display:flex;justify-content:space-between;gap:6px;font-variant-numeric:tabular-nums}
+  .bid-line .who{color:var(--text);min-width:0;overflow-wrap:anywhere} .bid-line .amt{color:var(--accent);font-weight:700}
+  .bid-line.winner{background:rgba(63,185,127,.12);border-radius:4px;padding:1px 4px}
+  .job-status-note{font-size:11px;color:var(--muted);margin-top:5px}
+  .sev{font-weight:800}.sev.P0,.sev.P1{color:var(--red-bright)}.sev.P2{color:var(--amber)}.sev.P3{color:var(--muted)}
+
+  /* Feeds */
+  .feed{display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;margin-bottom:16px;padding-right:4px;
+    overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+  .feed::-webkit-scrollbar{width:8px}
+  .feed::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+  .feed-item{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:13px;animation:feedin .3s ease-out;
+    content-visibility:auto;contain-intrinsic-size:auto 44px}
+  @keyframes feedin{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+  .feed-item .amt{font-weight:800;font-variant-numeric:tabular-nums}
+  .feed-item .amt.pos{color:var(--green)} .feed-item .amt.neg{color:var(--red-bright)}
+  .feed-item .why{color:var(--muted);overflow-wrap:anywhere}
+  .feed-item time{color:var(--muted);font-size:11px;display:block}
+  .feed-item.pinkslip{border-color:var(--red);background:rgba(229,83,75,.10)}
+  .feed-item.pinkslip .why{color:var(--red-bright);font-weight:700}
+  .feed-item.hire{border-color:var(--pink)}
+  .feed-item.appeal{border-color:var(--amber)}
+  /* Narration is distinguished from the ledger by a tinted surface, not a
+     side tab; event-type colour stays on the full border (see above). */
+  .narration-log .feed-item{background:#181e2b}
+
+  /* Payroll overlay — native <dialog>. The UA supplies the top layer; the
+     element itself is the full-viewport flex stage, ::backdrop the dim. */
+  dialog.overlay{border:0;padding:0;margin:0;background:transparent;color:var(--text);cursor:pointer;
+    width:100%;height:100%;max-width:100vw;max-height:100vh;overscroll-behavior:contain}
+  dialog.overlay[open]{display:flex;align-items:center;justify-content:center}
+  dialog.overlay::backdrop{background:rgba(4,6,10,.72)}
+  dialog.overlay{opacity:1;transition:opacity .25s ease-out}
+  @starting-style{dialog.overlay[open]{opacity:0}}
+  .overlay-card{background:var(--panel);border:1px solid var(--red);border-radius:14px;padding:24px 28px;max-width:560px;width:92%}
+  .overlay-card h2{margin-top:0;text-wrap:balance}
+  .payroll-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums}
+  .payroll-table th,.payroll-table td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left}
+  .payroll-table td.num,.payroll-table th.num{text-align:right}
+  .verdict{font-weight:800}.verdict.SAFE{color:var(--green)}.verdict.ON-NOTICE{color:var(--amber)}.verdict.FIRED{color:var(--red-bright)}
+  .overlay-hint{color:var(--muted);font-size:12px;text-align:center;margin-bottom:0}
+
+  /* Toast */
+  .toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--accent);color:var(--text);border-radius:10px;padding:10px 18px;z-index:60;font-weight:600;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  .toast.error{border-color:var(--red)}
+}
+
+@layer utilities {
+  .hidden{display:none !important}
+  @media (prefers-contrast: more){
+    :root{--muted:#c3cadb;--line:#33405a}
+  }
+}
+
+@layer motion {
+  /* Reduced motion: stop the attention effects (shake, pulse, flashing
+     banner, scrolling ticker, slide-ins) but keep opacity/width state cues,
+     shortened — state must stay readable without movement. */
+  @media (prefers-reduced-motion: reduce){
+    .agent-card.shake,.agent-card.newhire,.payroll-banner,.ticker-track.scrolling,.feed-item{animation:none}
+    .btn,.skip-link,.rep-fill,.agent-card,dialog.overlay{transition-duration:.01s}
+  }
+}

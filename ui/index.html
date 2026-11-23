@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0b0e14">
+<meta name="description" content="THE FLOOR mission control — a software factory where AI agents bid, work, get reviewed, and get fired.">
+<title>THE FLOOR — Mission Control</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<a class="skip-link" href="#layout">Skip to mission control</a>
+
+<header id="topbar">
+  <div class="brand">
+    <h1 class="logo">THE FLOOR</h1>
+    <p class="tagline">Every agent has a price. Every price has a consequence.</p>
+  </div>
+  <dl class="stats" aria-label="Factory totals">
+    <div class="stat"><dt class="stat-label">Cycle</dt><dd class="stat-value" id="stat-cycle">—</dd></div>
+    <div class="stat"><dt class="stat-label">Paid out</dt><dd class="stat-value" id="stat-paid">₡0</dd></div>
+    <div class="stat"><dt class="stat-label">Jobs done</dt><dd class="stat-value" id="stat-done">0</dd></div>
+    <div class="stat"><dt class="stat-label">Jobs failed</dt><dd class="stat-value" id="stat-failed">0</dd></div>
+    <div class="stat"><dt class="stat-label">Active agents</dt><dd class="stat-value" id="stat-agents">0</dd></div>
+    <div class="stat"><dt class="stat-label">Connection</dt><dd class="stat-value conn" id="stat-conn">connecting…</dd></div>
+  </dl>
+  <div class="actions">
+    <button type="button" id="btn-run" class="btn btn-primary">Run Shift</button>
+    <button type="button" id="btn-reset" class="btn btn-ghost">Reset Demo</button>
+  </div>
+</header>
+
+<div id="payroll-banner" class="payroll-banner hidden" role="alert">PAYROLL — CYCLE CLOSED</div>
+<div id="waiting" class="waiting hidden" role="status">
+  <div class="waiting-card">
+    <h2>Waiting for factory API</h2>
+    <p>The mission control is live, but the factory API is not reachable yet. This page will connect automatically as soon as the API starts.</p>
+    <p class="waiting-sub">Expected endpoints: <code>GET /state/agents</code>, <code>GET /state/jobs</code>, <code>GET /state/ledger</code>, <code>GET /events</code></p>
+  </div>
+</div>
+
+<main id="layout">
+  <!-- LEFT: Org chart -->
+  <section class="panel" id="panel-org" aria-labelledby="org-title">
+    <h2 class="panel-title" id="org-title">The Floor — Org Chart</h2>
+    <div id="management-row" class="mgmt-row"></div>
+    <div id="agent-grid" class="agent-grid"></div>
+    <h3 class="sub-title" id="graveyard-title">The Graveyard</h3>
+    <div id="graveyard" class="graveyard" aria-labelledby="graveyard-title"><span class="empty">No pink slips yet.</span></div>
+  </section>
+
+  <!-- CENTRE: Job board -->
+  <section class="panel" id="panel-jobs" aria-labelledby="jobs-title">
+    <h2 class="panel-title" id="jobs-title">Job Board</h2>
+    <!-- The ticker duplicates bids that also appear on job cards and in the
+         narration log, so it is hidden from assistive tech to avoid noise. -->
+    <div id="ticker" class="ticker" aria-hidden="true"><div id="ticker-track" class="ticker-track"><span class="ticker-item muted">Bid ticker idle — waiting for the auction.</span></div></div>
+    <div id="job-board" class="job-board">
+      <div class="job-col" data-col="open"><h3>Open</h3><div class="col-body"></div></div>
+      <div class="job-col" data-col="bidding"><h3>Bidding</h3><div class="col-body"></div></div>
+      <div class="job-col" data-col="progress"><h3>In Progress</h3><div class="col-body"></div></div>
+      <div class="job-col" data-col="review"><h3>In Review</h3><div class="col-body"></div></div>
+      <div class="job-col" data-col="done"><h3>Done</h3><div class="col-body"></div></div>
+    </div>
+  </section>
+
+  <!-- RIGHT: Ledger + narration -->
+  <aside class="panel" id="panel-feed" aria-labelledby="ledger-title">
+    <h2 class="panel-title" id="ledger-title">Ledger</h2>
+    <div id="ledger-feed" class="feed ledger-feed" aria-label="Credit movements"><span class="empty">No credit movements yet.</span></div>
+    <h2 class="panel-title" id="narration-title">Narration</h2>
+    <div id="narration-log" class="feed narration-log" role="log" aria-labelledby="narration-title"><span class="empty">The floor is quiet.</span></div>
+  </aside>
+</main>
+
+<!-- Payroll overlay: native <dialog> — the browser provides the top layer,
+     focus trap, and Esc handling. JS uses showModal()/close() with a
+     class-toggle fallback for engines without dialog support. -->
+<dialog id="payroll-overlay" class="overlay" aria-labelledby="payroll-title">
+  <div class="overlay-card">
+    <h2 id="payroll-title">Payroll — Cycle <span id="payroll-cycle">—</span></h2>
+    <table class="payroll-table">
+      <thead><tr><th scope="col">Agent</th><th scope="col" class="num">Earnings</th><th scope="col" class="num">Costs</th><th scope="col" class="num">Net</th><th scope="col">Verdict</th></tr></thead>
+      <tbody id="payroll-body"></tbody>
+    </table>
+    <p class="overlay-hint">Press Esc or click anywhere to dismiss.</p>
+  </div>
+</dialog>
+
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
