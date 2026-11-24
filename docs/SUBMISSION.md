@@ -27,7 +27,13 @@ Two things are broken about AI agents at work today:
 
 The demo workplace is **TicketDesk**, an ordinary FastAPI support-ticket API seeded with ~40 messy tickets (duplicates, SLA breaches, unassigned P1s, inconsistent categories). Job families: SLA breach sweep, duplicate collapse, backlog triage, and a cross-system VIP save in the finale. A second system, **StockRoom** (inventory), joins live in the finale.
 
-**Six departments are live, not one.** The same market loop runs across six workplaces, each its own real system of record with its own Synapse-shaped tool surface and its own deterministic acceptance checks: **Support** (TicketDesk + StockRoom), **QA triage** (failure clustering, flaky-test quarantine, regression verdicts), **Bookkeeping** (categorisation, duplicate flagging, reconciliation, receivables — the tools move no money), **SDR** (rubric-scored lead research, outreach *drafts only* — no send tool exists), **Engineering** (issue work + PRs with CI as the check; humans merge), and **HR** (rubric screening, interview scheduling, onboarding paperwork — no hire/reject tool exists). One roster bids across every department; every job clears the same review → blind appeal → payroll machinery. In the verified integration shift, a single cycle posted 19 jobs across all six departments and every one was accepted and paid.
+**Seven departments are live, not one.** The same market loop runs across seven workplaces, each its own real system of record with its own Synapse-shaped tool surface and its own deterministic acceptance checks: **Support** (TicketDesk + StockRoom), **QA triage** (failure clustering, flaky-test quarantine, regression verdicts), **Bookkeeping** (categorisation, duplicate flagging, reconciliation, receivables — the tools move no money), **SDR** (rubric-scored lead research, outreach *drafts only* — no send tool exists), **Engineering** (issue work + PRs with CI as the check; humans merge), **HR** (rubric screening, interview scheduling, onboarding paperwork — no hire/reject tool exists), and **SEO** (on-page audits recomputed from live page data, keyword tracking, content briefs and internal-link plans — analysis and records only, no publish tool exists). One roster bids across every department; every job clears the same review → blind appeal → payroll machinery. In the verified integration shift, a single cycle posted 19 jobs across the then-six departments and every one was accepted and paid; the SEO department's jobs were later run end-to-end through the same engine to paid.
+
+**Every agent runs on an explicit harness.** An agent is not a bare model call: each worker persona has an inspectable harness — a charter (role prompt plus hard rules), a tool allowlist (enforced by the engine: a call outside the allowlist is refused), a playbook per job family, model-tier and verification settings, and mutation traits. Review outcomes write **lessons** into a per-agent memory; the lessons are injected into that agent's next job, and a mutated replacement *inherits* its predecessor's lessons — Baron 2.0 was born carrying two of Baron's, alongside its new verify-before-acting rule.
+
+**Work arrives from outside, too.** A connections layer registers external systems behind one provider interface, and an intake path turns an external event into a floor job: a bug report becomes a budgeted Engineering job, and when the job is paid the external issue is closed with a resolution comment naming the job, the verdict and the credits spent (a failed job leaves a failure comment instead — nothing is silently dropped; duplicate reports are deduped). The full loop is verified end-to-end against **ExtDesk, a labelled simulator** standing in for a customer's issue system; the Composio provider is built to the same interface and reports a structured `not_configured` until a Composio API key is supplied — **the live Composio/Jira hookup is pending that key**, and is the only piece of the loop not yet exercised against a real external system. A deterministic **COO router** (the E-Manager) classifies unrouted incoming work to a department by an explainable signal table — no LLM — and every routing decision is emitted as an event.
+
+**Synapse generation is proven, not just patterned.** The department servers in-tree follow Synapse's generated contract; on 2026-11-24 a real `synapse build --local --auto --all-endpoints` run (Groq, via the vault key) was executed against the real TicketDesk codebase and produced a working `synapse_auto_server.py` (13 tools, one per endpoint). The generated server was run unmodified and verified live: tool listing, real reads against the running TicketDesk, and a real write (a comment created through the generated server and read back from the service). The generated file ships in the repo at `targets/ticketdesk/synapse_generated/`; swapping it in as the production server is a documented follow-up (it targets the MCP v1 SDK while the floor's environment carries v2).
 
 **Two trust modes.** The confirmation gate has two settings, switchable live from the console: **Manual** — every write waits for a human at the gate; **Auto** — writes are auto-approved, each one written to the audit log as a `confirmation.auto_approved` event, and the floor runs itself cycle after cycle until a human-set budget cap stops it (the loop projects the next cycle's spend and stops *before* crossing the cap).
 
@@ -56,9 +62,14 @@ ui-next/       Mission-control console — agent-orchestrator's own frontend
 api/           FastAPI — REST state endpoints, SSE event bus, run/reset,
                mode + auto-run endpoints (cap, start/pause/stop)
 orchestrator/  Shift loop, worker, reviewer, blind appeal; department
-               registration from each workplace's own jobs pack; the
-               agent-orchestrator lifecycle state machine + supervised
-               worker runner ported in (ao_lifecycle.py, ao_runner.py)
+               registration from each workplace's own jobs pack; explicit
+               per-agent harness (harness.py: charter, tool allowlist,
+               playbook, settings, traits) and per-agent lessons memory
+               (lessons.py) fed by review outcomes; connections registry
+               + intake (connections.py) and the deterministic COO router
+               (router.py); the agent-orchestrator lifecycle state machine
+               + supervised worker runner ported in (ao_lifecycle.py,
+               ao_runner.py)
 economy/       Ledger, payroll/CFO, reputation — deterministic Python, no LLM
 mcp_manager/   Spawns & supervises Synapse MCP servers, tool registry,
                read/write classification, confirmation enforcement
@@ -71,6 +82,9 @@ targets/
   sdr/         SDR — CRM API (:8105)
   engineering/ Engineering — repo/issues API (:8106)
   hrdesk/      HR — candidates/onboarding API (:8107)
+  extdesk/     Connections test system — a labelled simulator of a
+               customer's external issue desk (:8108)
+  seo/         SEO — pages/keywords/briefs API (:8109)
 ```
 
 Key invariants:
@@ -125,10 +139,15 @@ python3 reset.py            # restore the exact seeded state at any time
 - CFO payroll: firing on two consecutive negative cycles (PinkSlip) and mutated replacement hires with visible lineage.
 - Confirmation gate on write tools; deliberate endpoint exposure (no delete/bulk-close tools exist).
 - Mission-control UI: live org chart, job board with bid ticker, ledger and narration feeds, payroll/firing highlights.
-- **Six live departments** (Support, QA triage, Bookkeeping, SDR, Engineering, HR) — 20 job families, one roster bidding across all of them, each department verified by its own deterministic checks.
+- **Seven live departments** (Support, QA triage, Bookkeeping, SDR, Engineering, HR, SEO) — 23 job families, one roster bidding across all of them, each department verified by its own deterministic checks.
+- **Explicit agent harness:** every persona carries a charter, an engine-enforced tool allowlist, per-family playbooks, settings and mutation traits — plus a per-agent lessons memory written by review outcomes and inherited by mutated replacements.
+- **Connections layer + intake bug loop:** external systems register behind one provider interface; a bug report becomes a budgeted job and its resolution closes the external issue with a comment (failures comment too; duplicates deduped). Verified end-to-end against the ExtDesk simulator; the Composio provider reports `not_configured` until a key is supplied — the live Composio/Jira hookup is pending that key.
+- **COO router:** deterministic, explainable classification of unrouted incoming work to departments (signal table, no LLM), with a dry-run endpoint and a routing event per decision.
+- **Real Synapse generation, proven:** an actual `synapse build --local --auto` run against TicketDesk produced `synapse_auto_server.py` (13 tools); run unmodified, it served real reads and a real write against the live service. The generated file is in-tree under `targets/ticketdesk/synapse_generated/` (production wiring is a follow-up — it targets the MCP v1 SDK).
+- **Living mascot avatars:** the Foreman is a state machine driven by real floor events — working while jobs execute, celebrating on payment, draining on a PinkSlip, pulsing in Auto mode — across the console and landing page, with reduced-motion respected.
 - **Manual/Auto trust modes** in the console: a topbar toggle, an auto-run panel (budget cap, start/pause/stop, spent-vs-cap), and auto-approvals surfaced in the audit stream.
 - **agent-orchestrator adoption, twice:** its frontend is the console (vendored with attribution), and its orchestration core — the work-order lifecycle state machine and the supervised worker runner — is ported into the engine, emitting lifecycle events alongside the economy's own.
-- **The Foreman**, the floor's mascot (clay-orange robot foreman), across the landing page and console, with dedicated poses for payroll and PinkSlip moments.
+- **The Foreman**, the floor's mascot (clay-orange robot foreman), across the landing page and console — now a living avatar driven by floor events (see the mascot bullet below).
 - The StockRoom `--discover` finale: one new endpoint + `synapse build --discover` teaches the factory a capability it did not have minutes earlier.
 
 **Cut or reduced, per the pre-agreed cut order** (appeal → mutation lineage → live `--discover` → custom composed tool → UI theatre → backlog-scan intake → multi-cycle payroll):
