@@ -638,14 +638,18 @@ def cycle_close(conn: sqlite3.Connection, cycle_no: int | None = None,
                          note=f"running cost cycle {cycle_no}")
             charged = agent["base_salary_credits"]
         net_row = conn.execute(
-            "SELECT COALESCE(SUM(amount_credits), 0) AS net FROM ledger WHERE agent_id = ? AND cycle_no = ?",
+            """SELECT COALESCE(SUM(amount_credits), 0) AS net,
+                      COALESCE(SUM(CASE WHEN amount_credits > 0 THEN amount_credits ELSE 0 END), 0) AS earnings,
+                      COALESCE(-SUM(CASE WHEN amount_credits < 0 THEN amount_credits ELSE 0 END), 0) AS costs
+               FROM ledger WHERE agent_id = ? AND cycle_no = ?""",
             (agent["id"], cycle_no)).fetchone()
         completed_row = conn.execute(
             """SELECT COUNT(*) AS n FROM work_orders
                WHERE agent_id = ? AND cycle_no = ? AND status IN ('accepted', 'appeal_accepted')""",
             (agent["id"], cycle_no)).fetchone()
         per_agent[agent["id"]] = {"net": net_row["net"], "completed": completed_row["n"],
-                                  "charged": charged}
+                                  "charged": charged, "name": agent["name"],
+                                  "earnings": net_row["earnings"], "costs": net_row["costs"]}
 
     # Previous closed cycle's per-agent summary (for the 2-cycle window).
     prev = conn.execute(
@@ -685,12 +689,24 @@ def cycle_close(conn: sqlite3.Connection, cycle_no: int | None = None,
             if hire_replacements:
                 hired.append(hire_mutated_replacement(conn, agent["id"], cycle_no))
 
+    # Payroll rows for the UI dialog: one row per agent, verdict from the
+    # firing outcome. The cycle.closed event carries these so the mission
+    # control can render the payroll table without a second source.
+    payroll_rows = []
+    for aid, a in per_agent.items():
+        verdict = "FIRED" if aid in fired else ("ON-NOTICE" if a["net"] < 0 else "SAFE")
+        payroll_rows.append({"agent_id": aid, "name": a["name"],
+                             "earnings": a["earnings"], "costs": a["costs"],
+                             "net": a["net"], "completed": a["completed"],
+                             "verdict": verdict})
     summary = {"cycle_no": cycle_no,
                "agents": {str(k): v for k, v in per_agent.items()},
+               "payroll": payroll_rows,
                "fired": fired, "hired": hired}
     with conn:
         conn.execute("UPDATE payroll_cycles SET closed_at = ?, summary_json = ? WHERE cycle_no = ?",
                      (now_iso(), json.dumps(summary), cycle_no))
-        emit_event(conn, "cycle.closed", {"cycle_no": cycle_no, "fired": fired, "hired": hired})
+        emit_event(conn, "cycle.closed", {"cycle_no": cycle_no, "fired": fired,
+                                          "hired": hired, "payroll": payroll_rows})
     conn.commit()
     return summary

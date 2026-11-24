@@ -169,6 +169,12 @@ export default function FloorClient() {
       const type = String(pick(ev as unknown as Record<string, unknown>, "type", "event") ?? "");
       const p = payloadOf(ev);
       const seq = Number(pick(ev as unknown as Record<string, unknown>, "seq", "id"));
+      // A genuinely new event always carries the highest seq so far, so
+      // anything at or below the watermark is a replay or a duplicate
+      // frame (the stream replays on reconnect, and named listeners can
+      // double-deliver). Skipping those keeps one-shot effects — the
+      // payroll dialog above all — from re-firing.
+      if (Number.isFinite(seq) && seq > 0 && seq <= lastSeq.current) return;
       if (Number.isFinite(seq) && seq > lastSeq.current) lastSeq.current = seq;
       const text = eventText(ev, p);
 
@@ -332,7 +338,10 @@ export default function FloorClient() {
 
     const connect = () => {
       try {
-        es = new EventSource(`${API_BASE}/events`);
+        // Resume from the last seen seq: the stream replays from from_seq,
+        // and a full replay would re-fire one-shot UI effects (the payroll
+        // dialog) on every reconnect.
+        es = new EventSource(`${API_BASE}/events?from_seq=${lastSeq.current}`);
       } catch {
         retry = setTimeout(connect, 5000);
         return;
