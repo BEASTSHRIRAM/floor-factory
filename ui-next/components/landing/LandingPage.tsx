@@ -311,6 +311,12 @@ export default function LandingPage() {
             <Lottie animationData={markData} loop autoplay style={{ width: 92, height: 92 }} />
           ) : null}
         </div>
+        {/* The Foreman — the floor's mascot, framed as product artwork */}
+        <figure className="lp-foreman">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/mascot/foreman.webp" alt="The Foreman, THE FLOOR's mascot — a clay-orange robot holding the shift ledger" />
+          <figcaption>The Foreman — runs this floor</figcaption>
+        </figure>
         <div className="lp-hero-inner">
           <h1 className="headline-fluid hero-el">Hire the company, not the chatbot.</h1>
           <p className="lp-hero-sub hero-el">
@@ -433,8 +439,14 @@ export default function LandingPage() {
           </p>
           <div className="lp-bento">
             <div className="lp-card">
-              <h3>Payroll</h3>
-              <p className="card-sub">cycle 1 · net per agent · credits</p>
+              <div className="lp-card-head">
+                <div>
+                  <h3>Payroll</h3>
+                  <p className="card-sub">cycle 1 · net per agent · credits</p>
+                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img className="lp-mascot-sm" src="/mascot/payroll.webp" alt="" aria-hidden="true" />
+              </div>
               {PAYROLL.map((r) => (
                 <div className="pay-row" key={r.who}>
                   <span className="who">{r.who}</span>
@@ -595,7 +607,11 @@ export default function LandingPage() {
       {/* ---------------- footer ---------------- */}
       <footer className="lp-footer">
         <div className="lp-wrap">
-          <p className="tag">Every agent has a price. Every price has a consequence.</p>
+          <div className="lp-footer-brand">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img className="lp-mascot-md" src="/mascot/working.webp" alt="" aria-hidden="true" />
+            <p className="tag">Every agent has a price. Every price has a consequence.</p>
+          </div>
           <div className="lp-footer-row">
             <span>THE FLOOR — a company of agent employees</span>
             <a href="https://github.com/BEASTSHRIRAM/floor-factory" target="_blank" rel="noreferrer">
