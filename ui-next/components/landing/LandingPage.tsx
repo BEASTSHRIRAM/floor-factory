@@ -82,11 +82,11 @@ const METRICS = [
 
 const DEPTS = [
   { name: "Support", chip: "LIVE", cls: "live", d: "Triage, assignment and resolution on your real helpdesk, with SLA sweeps every cycle.", sys: "workplace · TicketDesk via Synapse" },
-  { name: "QA triage", chip: "ROADMAP", cls: "warn", d: "Failure clustering, flaky-test quarantine and regression verdicts on every build.", sys: "phase 1 · queue-shaped, fully reviewable" },
-  { name: "Bookkeeping", chip: "ROADMAP", cls: "warn", d: "Categorisation, reconciliation and receivables chasing against your accounting system.", sys: "phase 1 · deterministic checks first" },
-  { name: "SDR", chip: "ROADMAP", cls: "warn", d: "Account research and outreach drafts. Sending is a promotion, earned by draft-acceptance rate.", sys: "phase 1 drafts · phase 2 sending" },
-  { name: "Engineering", chip: "ROADMAP", cls: "warn", d: "Ticket work on your repository through Synapse tools, with CI as the deterministic check and a per-PR gate.", sys: "phase 2 · reviewable by construction" },
-  { name: "HR", chip: "ROADMAP", cls: "warn", d: "Recruiting coordination, scheduling and onboarding paperwork. Hiring decisions stay with humans.", sys: "phase 2 · decisions stay human" },
+  { name: "QA triage", chip: "LIVE", cls: "live", d: "Failure clustering, flaky-test quarantine and regression verdicts on every build.", sys: "workplace · QA bench via Synapse" },
+  { name: "Bookkeeping", chip: "LIVE", cls: "live", d: "Categorisation, reconciliation and receivables chasing against your accounting system. The tools move no money — categorise, flag, remind, note.", sys: "workplace · Ledger via Synapse" },
+  { name: "SDR", chip: "LIVE", cls: "live", d: "Account research scored against a published rubric, and outreach drafts. Drafts only — there is no send tool; sending stays human.", sys: "workplace · CRM via Synapse" },
+  { name: "Engineering", chip: "LIVE", cls: "live", d: "Ticket work on your repository through Synapse tools, with CI as the deterministic check. Workers open PRs; a human merges.", sys: "workplace · Repo via Synapse" },
+  { name: "HR", chip: "LIVE", cls: "live", d: "Screening against a published rubric, interview scheduling and onboarding paperwork. Hire and reject decisions stay with humans — no such tool exists.", sys: "workplace · HR desk via Synapse" },
 ];
 
 const TIERS = [
@@ -546,8 +546,9 @@ export default function LandingPage() {
           <h2 className="lp-h2" data-reveal>One floor. Every function.</h2>
           <p className="lp-lede" data-reveal>
             A department exists where a workplace exists: one real system, onboarded by Synapse,
-            with its tool allowlist as the department charter. Support is live today; the rest
-            roll out in order of how reviewable the work is.
+            with its tool allowlist as the department charter. All six departments are live today —
+            the same crew bids across every one of them, and every job clears the same review,
+            appeal and payroll machinery.
           </p>
           <div className="lp-depts">
             {DEPTS.map((d) => (

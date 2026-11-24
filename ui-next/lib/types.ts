@@ -37,6 +37,8 @@ export interface Job {
   winner?: string;
   severity?: string;
   bids?: Bid[];
+  department?: string;
+  department_label?: string;
   [key: string]: unknown;
 }
 

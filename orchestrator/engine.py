@@ -5,7 +5,9 @@ implementation keeps the same topology (intake -> bid -> award -> execute ->
 review -> appeal -> cycle close) as plain Python so the demo runs headless
 with zero extra dependencies. LLM use is optional flavour only (narration
 via orchestrator.llm, Groq openai/gpt-oss-120b when GROQ_API_KEY is set);
-every decision is code.
+every decision is code. Write confirmations branch on the floor mode
+(orchestrator.mode: manual = human-gated, auto = auto-approved + audited;
+see docs/MODES.md).
 
 Shift loop, per cycle:
   1. Manager scans TicketDesk (GET /stats/summary through the tool layer)
@@ -56,6 +58,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from orchestrator import llm as _llm  # noqa: E402
 from orchestrator import tools as _tools  # noqa: E402
 
+# AO orchestration port (docs/AO_ORCHESTRATION_MAP.md §5): the runner
+# supervises job execution; it never decides outcomes.
+try:  # package import (normal use)
+    from orchestrator.ao_lifecycle import WorkOrderLifecycle, WorkOrderState
+    from orchestrator.ao_runner import CallableWorkUnit, RunnerConfig, WorkerRunner
+except Exception:  # noqa: BLE001 — standalone use inside orchestrator/
+    from ao_lifecycle import WorkOrderLifecycle, WorkOrderState  # type: ignore
+    from ao_runner import CallableWorkUnit, RunnerConfig, WorkerRunner  # type: ignore
+
 # --- economy contract: real package if importable, else the local shim -----
 try:  # pragma: no cover - exercised by integration state
     from economy import core as ECO
@@ -86,9 +97,19 @@ def fold_category(raw: str) -> str:
 
 class Family:
     def __init__(self, key: str, title: str, brief: str, budget: int,
-                 criteria: list[str], min_cycle: int = 1):
+                 criteria: list[str], min_cycle: int = 1, *,
+                 department: str = "support", server: str = "ticketdesk",
+                 execute: Optional[Callable] = None,
+                 check: Optional[Callable] = None):
         self.key, self.title, self.brief = key, title, brief
         self.budget, self.criteria, self.min_cycle = budget, criteria, min_cycle
+        # Department integration (orchestrator/departments.py): which
+        # workplace the job belongs to, which tool server executes it,
+        # and — for department families — the department's own executor /
+        # deterministic check callables. Support families leave these
+        # None and dispatch to exec_<key>() / verify() as before.
+        self.department, self.server = department, server
+        self.execute, self.check = execute, check
 
 
 JOB_FAMILIES: list[Family] = [
@@ -145,6 +166,17 @@ JOB_FAMILIES: list[Family] = [
     ),
 ]
 
+# Department workplaces (QA, Bookkeeping, SDR, Engineering, HR) register
+# their jobs packs as families too — built generically from each
+# department's own manifest/jobs pack by orchestrator/departments.py.
+try:  # package import (normal use)
+    from orchestrator import departments as _departments
+except Exception:  # noqa: BLE001 — standalone use inside orchestrator/
+    import departments as _departments  # type: ignore
+
+JOB_FAMILIES += _departments.department_families(Family)
+DEPT_LABELS = _departments.DEPT_LABELS
+
 FAMILIES_BY_KEY = {f.key: f for f in JOB_FAMILIES}
 
 # Persona traits keyed by agent name (roster from economy.core._ROSTER).
@@ -184,6 +216,14 @@ class FloorEngine:
         self.db_path = db_path or os.environ.get("FLOOR_DB") or None
         self.tools = tool_client or _tools.get_tool_client()
         self.conn = None  # opened by run_shift / helpers
+        # AO runner + per-job lifecycle machines (AO_ORCHESTRATION_MAP §5).
+        # The runner's sink is connection-isolated: the runner emits from
+        # its heartbeat thread, and the engine's own connection is not
+        # thread-safe — each runner event takes a short-lived connection
+        # (WAL + busy_timeout make this safe).
+        self.runner = WorkerRunner(self._emit_isolated, config=RunnerConfig())
+        self._machines: dict[int, WorkOrderLifecycle] = {}
+        self._job_ctx: dict[int, dict] = {}
 
     # -- plumbing -----------------------------------------------------------
 
@@ -199,28 +239,81 @@ class FloorEngine:
             EDB.emit_event(conn, type_, payload)
         conn.commit()
 
+    def _emit_isolated(self, type_: str, payload: dict) -> None:
+        """Event sink for the AO runner: own connection per event, safe to
+        call from the runner's threads (see __init__)."""
+        conn = EDB.get_conn(self.db_path)
+        try:
+            with conn:
+                EDB.emit_event(conn, type_, payload)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _emit_machine(self, machine: WorkOrderLifecycle):
+        """Forward an engine-level lifecycle event onto the floor bus."""
+        def _forward(ev) -> None:
+            floor = ev.to_floor_event()
+            self._emit(f"runner.{floor['type']}", floor["payload"])
+        return _forward
+
     def narrate(self, text: str, *, kind: str = "narration") -> None:
         self._emit("narration", {"text": text, "kind": kind})
+
+    def dept_call(self, server: str, wo_id: int, worker_name: str) -> Callable:
+        """A `call(tool_name, args)` closure bound to one department's
+        tool server — the shape every department check/worker module was
+        built against (see orchestrator/departments.py)."""
+        def call(tool_name: str, args: Optional[dict] = None) -> Any:
+            return self.call(wo_id, tool_name, args or {},
+                             worker_name=worker_name, server=server)
+        return call
 
     # -- tool execution with gate + transcript ------------------------------
 
     def call(self, wo_id: Optional[int], tool_name: str, args: Optional[dict] = None,
-             *, worker_name: str = "manager") -> Any:
+             *, worker_name: str = "manager", server: str = SERVER) -> Any:
         """Execute one allowlisted tool. Writes pass the confirmation gate.
 
         Every call on a work order is written to tool_calls (via economy)
         and emitted as a tool.executed event. Manager calls (wo_id=None)
-        are events only — tool_calls requires a work order.
+        are events only — tool_calls requires a work order. `server` is
+        the tool server kind (department workplace); Support calls leave
+        it at the default.
         """
         conn = self._open()
         args = dict(args or {})
-        effect = self.tools.effect(SERVER, tool_name)
+        effect = self.tools.effect(server, tool_name)
         confirmation_id: Optional[str] = None
         confirmed_by: Optional[str] = None
 
         if effect == "write":
+            # AO hook (AO_ORCHESTRATION_MAP §5.3): while a write waits on
+            # the confirmation gate, the job's lifecycle machine sits in
+            # BLOCKED (AO's sticky "paused on a decision"); it returns to
+            # WORKING when the gate resolves. The gate itself is untouched.
+            machine = self._machines.get(wo_id) if wo_id is not None else None
+            blocked = False
+            if machine is not None:
+                try:
+                    if machine.state is WorkOrderState.REMEDIATING:
+                        machine.transition(WorkOrderState.WORKING,
+                                           reason="appeal rework resumed")
+                    if machine.state is WorkOrderState.WORKING:
+                        machine.transition(WorkOrderState.BLOCKED,
+                                           reason=f"confirmation gate: {tool_name}")
+                        blocked = True
+                except Exception:  # noqa: BLE001 — the hook never breaks the gate
+                    blocked = False
             confirmation_id, approved, confirmed_by = _tools.request_confirmation(
                 wo_id or 0, tool_name, args)
+            if blocked and machine is not None:
+                try:
+                    if machine.state is WorkOrderState.BLOCKED:
+                        machine.transition(WorkOrderState.WORKING,
+                                           reason="confirmation gate resolved")
+                except Exception:  # noqa: BLE001
+                    pass
             self._emit("tool.confirmation_requested", {
                 "work_order_id": wo_id, "tool_name": tool_name, "args": args,
                 "confirmation_id": confirmation_id, "approved": approved,
@@ -237,7 +330,7 @@ class FloorEngine:
                 raise PermissionError(f"write {tool_name} denied at confirmation gate")
 
         try:
-            result = self.tools.call_tool(SERVER, tool_name, args)
+            result = self.tools.call_tool(server, tool_name, args)
         except Exception as exc:  # noqa: BLE001 — transcript must record failures too
             if wo_id is not None:
                 ECO.record_tool_call(conn, wo_id, tool_name, args=args, effect=effect,
@@ -434,6 +527,27 @@ class FloorEngine:
                              f"angry tickets without an escalation comment: {missing}")]
         raise ValueError(f"unknown family {family_key}")
 
+    # -- family dispatch (Support methods + department callables) ---------------
+
+    def _execute_family(self, family: Family, wo_id: int, winner: dict,
+                        *, remediate: bool = False) -> None:
+        """Run one family's work. Department families carry their own
+        executor callable; Support families dispatch to exec_<key>()."""
+        if family.key == "sla_breach":
+            self.exec_sla_breach(wo_id, winner, remediate=remediate)
+        elif family.execute is not None:
+            family.execute(self, family, wo_id, winner)
+        else:
+            executor: Callable[..., None] = getattr(self, f"exec_{family.key}")
+            executor(wo_id, winner)
+
+    def verify_family(self, family: Family, wo_id: int, worker_name: str) -> list[dict]:
+        """Deterministic verification for one job: the department's own
+        check module for department families, engine.verify() for Support."""
+        if family.check is not None:
+            return family.check(self, family, wo_id, worker_name)
+        return self.verify(family.key, wo_id, worker_name)
+
     # -- one job end-to-end ------------------------------------------------------
 
     def run_job(self, family: Family, cycle_no: int, reviewers: list[dict]) -> dict:
@@ -464,16 +578,61 @@ class FloorEngine:
         conn.commit()
         self.narrate(f"{winner['name']} won '{title}' at ₡{wo['agreed_price_credits']}.")
 
-        executor: Callable[..., None] = getattr(self, f"exec_{family.key}")
-        executor(wo_id, winner)
-        ECO.submit_work(conn, wo_id)
+        # AO lifecycle (AO_ORCHESTRATION_MAP §5): one machine per work
+        # order, driven by this method; the AO runner supervises only the
+        # execution segment below. Economy rules, the gate and the checks
+        # are untouched by either.
+        machine = WorkOrderLifecycle(wo_id)
+        machine._on_event = self._emit_machine(machine)
+        self._machines[wo_id] = machine
+        machine.transition(WorkOrderState.QUEUED, reason="work order created")
+        machine.transition(WorkOrderState.SPAWNING, reason="runner dispatch")
+        machine.transition(WorkOrderState.WORKING, reason=f"{winner['name']} executing")
 
-        findings = self.verify(family.key, wo_id, winner["name"])
+        exec_error: dict[str, Any] = {}
+
+        def _execute_segment() -> None:
+            # The runner executes on its own thread; sqlite connections
+            # are thread-bound, so the segment runs on a connection opened
+            # in this thread and the engine's main connection is restored
+            # afterwards (the shift loop is sequential — one job at a
+            # time — so the swap is safe).
+            main_conn = self.conn
+            self.conn = None
+            try:
+                self._open()
+                self._execute_family(family, wo_id, winner)
+                ECO.submit_work(self.conn, wo_id)
+                self.conn.commit()
+            except Exception as exc:  # noqa: BLE001 — re-raised on the main thread
+                exec_error["exc"] = exc
+                raise
+            finally:
+                if self.conn is not None:
+                    self.conn.close()
+                self.conn = main_conn
+
+        run_result = self.runner.run(
+            wo_id, winner["name"], CallableWorkUnit(execute=_execute_segment))
+        if run_result.status != "completed":
+            machine.transition(WorkOrderState.FAILED,
+                               reason=f"execution failed: {run_result.error}")
+            machine.terminate(reason="execution failed")
+            self._machines.pop(wo_id, None)
+            if "exc" in exec_error:
+                raise exec_error["exc"]
+            raise RuntimeError(run_result.error or "job execution failed")
+
+        machine.transition(WorkOrderState.WAITING_INPUT,
+                           reason="work submitted; awaiting review")
+        machine.transition(WorkOrderState.REVIEWING,
+                           reason="deterministic checks + reviewer")
+        findings = self.verify_family(family, wo_id, winner["name"])
         passed = all(f["passed"] for f in findings)
         reviewer_a = reviewers[0]
         verdict = "accept" if passed else "reject"
         severity = "none" if passed else "P1"
-        rationale = ("All acceptance criteria verified against live TicketDesk state."
+        rationale = ("All acceptance criteria verified against live workplace state."
                      if passed else
                      "Deterministic verification failed — automatic P1 (BRIEF rule). "
                      + "; ".join(f["detail"] for f in findings if not f["passed"]))
@@ -482,7 +641,7 @@ class FloorEngine:
         result: dict[str, Any] = {
             "job_id": job_id, "family": family.key, "title": title, "budget": budget,
             "winner": winner["name"], "price": wo["agreed_price_credits"],
-            "verdict": verdict, "appeal": None,
+            "verdict": verdict, "appeal": None, "department": family.department,
         }
         self.narrate(_llm.narrate(
             "You narrate a software factory floor in one short sentence.",
@@ -491,6 +650,9 @@ class FloorEngine:
             f"Reviewer {reviewer_a['name']} {verdict}ed {winner['name']} on '{title}'"
             f"{'' if passed else ' — ' + findings[0]['detail']}."))
         if passed:
+            machine.transition(WorkOrderState.SETTLED, reason="accepted and settled")
+            machine.terminate(reason="job settled")
+            self._machines.pop(wo_id, None)
             return result
 
         # --- appeal: worker remediates, blind reviewer re-checks ---------------
@@ -498,11 +660,19 @@ class FloorEngine:
         result["appeal"] = "filed"
         self.narrate(f"{winner['name']} is appealing the rejection on '{title}' "
                      f"(appeal fee ₡{ECO.APPEAL_FEE}).")
-        if family.key == "sla_breach":
-            self.exec_sla_breach(wo_id, winner, remediate=True)
-        else:
-            executor(wo_id, winner)  # generic remediation: re-run the family's work
-        new_findings = self.verify(family.key, wo_id, winner["name"])
+        machine.transition(WorkOrderState.REMEDIATING,
+                           reason="appeal: one remediation attempt")
+        # Generic remediation: re-run the family's work (sla_breach's
+        # executor takes the remediate flag; see _execute_family).
+        self._execute_family(family, wo_id, winner, remediate=True)
+        if machine.state is WorkOrderState.REMEDIATING:
+            machine.transition(WorkOrderState.WORKING,
+                               reason="remediation complete")
+        machine.transition(WorkOrderState.WAITING_INPUT,
+                           reason="remediation submitted")
+        machine.transition(WorkOrderState.REVIEWING,
+                           reason="blind appeal review")
+        new_findings = self.verify_family(family, wo_id, winner["name"])
         new_passed = all(f["passed"] for f in new_findings)
         reviewer_b = reviewers[1] if len(reviewers) > 1 else reviewers[0]
         # Blind by construction: reviewer B's inputs are brief + criteria +
@@ -520,6 +690,15 @@ class FloorEngine:
                      f"blind reviewer {reviewer_b['name']} re-checked the criteria."
                      + (f" Reviewer {reviewer_a['name']} takes a reputation hit."
                         if new_passed else ""))
+        if new_passed:
+            machine.transition(WorkOrderState.SETTLED,
+                               reason="appeal upheld; settled")
+            machine.terminate(reason="job settled on appeal")
+        else:
+            machine.transition(WorkOrderState.FAILED,
+                               reason="appeal denied")
+            machine.terminate(reason="job failed after appeal")
+        self._machines.pop(wo_id, None)
         return result
 
     # -- the shift ----------------------------------------------------------------

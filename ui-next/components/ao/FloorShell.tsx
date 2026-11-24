@@ -8,7 +8,7 @@
  * and type come from their theme tokens (Claude-recoloured); the
  * content is THE FLOOR's roster, ledger and event stream. */
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { AgentAvatar } from "../../vendor/ao/product-ui";
 import { Button } from "../../vendor/ao/button";
 import { API_BASE, credits, pick, signedCredits } from "../../lib/api";
@@ -17,6 +17,16 @@ import { presenceLabel, type TickerItem } from "./adapter";
 
 export type ConsoleMode = "live" | "demo";
 export type DemoPhase = "idle" | "playing" | "ended";
+export type FloorTrustMode = "manual" | "auto";
+export interface AutoRunStatus {
+  status: string;
+  budget_cap_credits: number | null;
+  spent_credits: number;
+  cycles_completed: number;
+  current_cycle: number | null;
+  stop_reason: string | null;
+  last_error: string | null;
+}
 export interface ShellStats {
   cycle: number | null;
   paidOut: number;
@@ -138,6 +148,12 @@ export default function FloorShell(props: {
   connected: boolean;
   mode: ConsoleMode;
   demoPhase: DemoPhase;
+  floorMode: FloorTrustMode | null;
+  autoStatus: AutoRunStatus | null;
+  onFloorModeChange: (m: FloorTrustMode) => void;
+  onAutoStart: (cap: number) => void;
+  onAutoPause: () => void;
+  onAutoStop: () => void;
   running: boolean;
   onRun: () => void;
   onReset: () => void;
@@ -156,8 +172,12 @@ export default function FloorShell(props: {
   const {
     stats, connected, mode, demoPhase, running, showHero, banner, apiUp,
     ledger, narration, ticker, pinkSlips,
+    floorMode, autoStatus, onFloorModeChange, onAutoStart, onAutoPause, onAutoStop,
   } = props;
   const demo = mode === "demo";
+  const [capDraft, setCapDraft] = useState("3000");
+  const autoRunning = autoStatus?.status === "running";
+  const autoPaused = autoStatus?.status === "paused";
   const nameById = new Map<string, string>();
   [...props.management, ...props.workers, ...props.fired].forEach((a) => nameById.set(a.id, a.name));
 
@@ -251,6 +271,29 @@ export default function FloorShell(props: {
             <StatChip label="Agents" value={String(stats.activeAgents)} />
           </div>
 
+          {!demo && floorMode && (
+            <div
+              className="ml-2 flex shrink-0 items-center rounded-full border border-border p-0.5"
+              role="group"
+              aria-label="Trust mode: manual gate or auto run"
+              title="Manual: every write waits for a human at the confirmation gate. Auto: writes are auto-approved and logged, and the floor runs itself up to a budget cap."
+            >
+              {(["manual", "auto"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => onFloorModeChange(m)}
+                  aria-pressed={floorMode === m}
+                  className={`rounded-full px-2.5 py-1 text-2xs font-medium capitalize transition-colors ${
+                    floorMode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          )}
+
           <div className="ml-auto flex shrink-0 items-center gap-2">
             {demo ? (
               <span className="inline-flex items-center gap-1.5 rounded-full bg-destructive/15 px-2.5 py-1 text-2xs font-medium text-destructive" role="status">
@@ -274,6 +317,76 @@ export default function FloorShell(props: {
 
         <div className="flex min-h-0 flex-1">
           <main className="flex min-w-0 flex-1 flex-col" id="main">
+            {!demo && floorMode === "auto" && (
+              <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border bg-card px-4 py-2" role="region" aria-label="Auto run controls">
+                <span className="text-2xs font-semibold uppercase tracking-[0.08em] text-passive">Auto run</span>
+                {autoStatus ? (
+                  <span className="text-xs text-muted-foreground">
+                    {autoRunning
+                      ? `Running${autoStatus.current_cycle ? ` — cycle ${autoStatus.current_cycle}` : ""}`
+                      : autoPaused
+                        ? "Paused — takes effect at the cycle boundary"
+                        : `Stopped${autoStatus.stop_reason ? ` (${autoStatus.stop_reason.replace(/_/g, " ")})` : ""}`}
+                    {" · "}
+                    <span className="font-mono tabular-nums text-foreground">
+                      {credits(autoStatus.spent_credits)}
+                    </span>{" "}
+                    spent
+                    {autoStatus.budget_cap_credits !== null && (
+                      <>
+                        {" "}of{" "}
+                        <span className="font-mono tabular-nums text-foreground">
+                          {credits(autoStatus.budget_cap_credits)}
+                        </span>{" "}
+                        cap
+                      </>
+                    )}
+                    {" · "}
+                    {autoStatus.cycles_completed} cycle{autoStatus.cycles_completed === 1 ? "" : "s"} done
+                    {autoStatus.last_error && <span className="text-destructive"> · {autoStatus.last_error}</span>}
+                  </span>
+                ) : (
+                  <span className="text-xs text-passive">Reading auto-run state…</span>
+                )}
+                <span className="ml-auto flex items-center gap-2">
+                  {!autoRunning && (
+                    <>
+                      <label className="flex items-center gap-1.5 text-2xs text-muted-foreground">
+                        Cap ₡
+                        <input
+                          type="number"
+                          min={1}
+                          value={capDraft}
+                          onChange={(e) => setCapDraft(e.target.value)}
+                          className="w-20 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs tabular-nums text-foreground"
+                          aria-label="Budget cap in credits"
+                        />
+                      </label>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        onClick={() => {
+                          const cap = Number(capDraft);
+                          if (Number.isFinite(cap) && cap > 0) onAutoStart(cap);
+                        }}
+                      >
+                        {autoPaused ? "Resume" : "Start"}
+                      </Button>
+                    </>
+                  )}
+                  {autoRunning && (
+                    <Button variant="outline" size="sm" onClick={onAutoPause}>
+                      Pause
+                    </Button>
+                  )}
+                  {(autoRunning || autoPaused) && (
+                    <Button variant="outline" size="sm" onClick={onAutoStop}>
+                      Stop
+                    </Button>
+                  )}
+                </span>
+              </div>
+            )}
             {banner && (
               <div className="shrink-0 border-b border-border bg-success/10 px-4 py-2 text-xs font-medium text-success" role="alert">
                 Payroll — cycle closed. Net pay, costs and verdicts are in the payroll statement.
