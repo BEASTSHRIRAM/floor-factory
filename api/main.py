@@ -542,6 +542,77 @@ def agents_catalog() -> dict:
 # department of its own — it is labelled as such in the catalogue.
 
 
+_SERVER_LABELS = {
+    "ticketdesk": "TicketDesk",
+    "stockroom": "StockRoom",
+    "qa": "QA",
+    "bookkeeping": "Bookkeeping",
+    "sdr": "SDR",
+    "engineering": "Engineering",
+    "hrdesk": "HR Desk",
+    "seo": "SEO",
+}
+_SERVER_DEPARTMENT = {
+    "ticketdesk": "support",
+    "stockroom": "support",
+    "qa": "qa",
+    "bookkeeping": "bookkeeping",
+    "sdr": "sdr",
+    "engineering": "engineering",
+    "hrdesk": "hr",
+    "seo": "seo",
+}
+
+
+@app.get("/state/catalogue")
+def state_catalogue() -> dict:
+    """The floor's catalogue, read-only over config that already exists:
+    the 23 registered job families grouped by department (brief, budget,
+    acceptance criteria, tool server) and the 8 workplaces with their
+    tool lists. Serves the Hire gallery and the department pages — the
+    data lives in orchestrator/engine.JOB_FAMILIES +
+    orchestrator/departments.DEPT_LABELS + orchestrator/tools.TOOL_SPECS
+    and is reachable through no other endpoint (the create-agent catalog
+    carries budgets and tool counts, but not briefs, criteria or tool
+    names)."""
+    departments = []
+    for dept, fams in _families_by_department().items():
+        servers = sorted({f.server for f in fams})
+        # A department's agents may also hold tools from sibling
+        # workplaces of the same department (Support crews hold
+        # StockRoom tools) — list every workplace of the department.
+        servers = sorted(set(servers) | {
+            s for s, d in _SERVER_DEPARTMENT.items() if d == dept})
+        budgets = [f.budget for f in fams]
+        departments.append({
+            "key": dept,
+            "label": floor_departments.DEPT_LABELS.get(dept, dept),
+            "servers": servers,
+            "budget_min": min(budgets) if budgets else 0,
+            "budget_max": max(budgets) if budgets else 0,
+            "families": [{
+                "key": f.key,
+                "title": f.title,
+                "brief": f.brief,
+                "budget_credits": f.budget,
+                "acceptance_criteria": list(f.criteria),
+                "server": f.server,
+                "tool_count": len(floor_tools.TOOL_SPECS.get(f.server, {})),
+            } for f in fams],
+        })
+    workplaces = [{
+        "server": server,
+        "label": _SERVER_LABELS.get(server, server),
+        "department": _SERVER_DEPARTMENT.get(server),
+        "tools": [{
+            "name": name,
+            "effect": spec.get("effect", "read"),
+            "gated": spec.get("effect") == "write",
+        } for name, spec in sorted(specs.items())],
+    } for server, specs in sorted(floor_tools.TOOL_SPECS.items())]
+    return {"departments": departments, "workplaces": workplaces}
+
+
 @app.post("/agents", status_code=201)
 async def agents_create(request: Request) -> dict:
     """Create an operator-designed agent and put it on the roster.

@@ -30,6 +30,31 @@ const NAV: { href: string; label: string; match: (p: string) => boolean }[] = [
     match: (p) => p.startsWith("/console/agents"),
   },
   {
+    href: "/console/directory",
+    label: "Directory",
+    match: (p) => p.startsWith("/console/directory"),
+  },
+  {
+    href: "/console/departments",
+    label: "Departments",
+    match: (p) => p.startsWith("/console/departments"),
+  },
+  {
+    href: "/console/payroll",
+    label: "Payroll",
+    match: (p) => p.startsWith("/console/payroll"),
+  },
+  {
+    href: "/console/analytics",
+    label: "Analytics",
+    match: (p) => p.startsWith("/console/analytics"),
+  },
+  {
+    href: "/console/hire",
+    label: "Hire",
+    match: (p) => p.startsWith("/console/hire"),
+  },
+  {
     href: "/console/profile",
     label: "Profile",
     match: (p) => p.startsWith("/console/profile"),
