@@ -10,6 +10,7 @@
 
 import { useState, type ReactNode } from "react";
 import { AgentAvatar } from "../../vendor/ao/product-ui";
+import Mascot, { type MascotState } from "../Mascot";
 import { Button } from "../../vendor/ao/button";
 import { API_BASE, credits, pick, signedCredits } from "../../lib/api";
 import type { Agent, LedgerRow, NarrationItem, Presence } from "../../lib/types";
@@ -135,6 +136,7 @@ function StatChip({ label, value }: { label: string; value: string }) {
 }
 
 export default function FloorShell(props: {
+  mascotState: MascotState;
   management: Agent[];
   workers: Agent[];
   fired: Agent[];
@@ -186,13 +188,7 @@ export default function FloorShell(props: {
       {/* ── Left rail: brand, roster, totals (their Sidebar structure) ── */}
       <aside className="flex w-[280px] shrink-0 flex-col border-r border-border bg-sidebar" aria-label="Agent roster">
         <div className="flex items-center gap-2.5 px-4 pb-2 pt-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/mascot/foreman.webp"
-            alt=""
-            aria-hidden="true"
-            className="size-9 shrink-0 rounded-lg border border-border object-cover"
-          />
+          <Mascot state={props.mascotState} size={36} />
           <span className="min-w-0">
             <span className="block truncate text-sm font-semibold leading-tight text-foreground">THE FLOOR</span>
             <span className="block truncate text-2xs leading-tight text-muted-foreground">Software factory · Synapse MCP</span>
@@ -423,12 +419,7 @@ export default function FloorShell(props: {
               <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-8">
                 <div className="w-full max-w-[720px] rounded-xl border border-border bg-card p-8 shadow-lg">
                   <div className="flex items-start gap-6">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src="/mascot/foreman.webp"
-                      alt="The Foreman, THE FLOOR's mascot"
-                      className="hidden w-[168px] shrink-0 rounded-lg border border-border object-cover sm:block"
-                    />
+                    <Mascot state={props.mascotState} size={168} className="hidden shrink-0 sm:block" />
                     <div className="min-w-0">
                   <p className="text-2xs font-semibold uppercase tracking-[0.14em] text-brand-logo-text">Live API offline</p>
                   <h2 className="font-display mt-3 text-[34px] leading-[1.12] text-foreground">

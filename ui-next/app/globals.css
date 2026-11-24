@@ -4,3 +4,108 @@
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 body { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+/* ── The Foreman mascot avatar (components/Mascot.tsx) ─────────────
+   Pose + motion state machine over the four approved WebP poses.
+   Transforms only (never layout properties), so state changes cause
+   no layout shift; pose swaps crossfade via opacity. */
+.mascot { position: relative; display: inline-block; flex: none; }
+.mascot-float { display: block; width: 100%; height: 100%; will-change: transform; }
+.mascot-stack {
+  position: relative; display: block; width: 100%; height: 100%;
+  overflow: hidden; border-radius: 24%;
+  border: 1px solid rgba(140, 132, 122, 0.45);
+  background: #211f1c;
+}
+.mascot-stack img {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  object-fit: cover; display: block; opacity: 0;
+  transition: opacity 0.35s ease, filter 0.3s ease;
+}
+.mascot-stack img.is-active { opacity: 1; }
+
+/* idle — gentle float + breathing scale; the stack adds a rare
+   blink-like dip (a quick scaleY squash on a long cycle). */
+.mascot--idle .mascot-float { animation: mascot-float 4.6s ease-in-out infinite; }
+.mascot--idle .mascot-stack { animation: mascot-blink 6.8s ease-in-out infinite; transform-origin: 50% 60%; }
+@keyframes mascot-float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-3.5%) scale(1.018); }
+}
+@keyframes mascot-blink {
+  0%, 91%, 100% { transform: scaleY(1); }
+  94% { transform: scaleY(0.93); }
+  97% { transform: scaleY(1); }
+}
+
+/* working — a busy rock/bounce loop; auto reuses it, slower. */
+.mascot--working .mascot-float { animation: mascot-work 1.7s ease-in-out infinite; }
+.mascot--auto .mascot-float { animation: mascot-work 2.6s ease-in-out infinite; }
+@keyframes mascot-work {
+  0%, 100% { transform: rotate(-2.2deg) translateY(0); }
+  50% { transform: rotate(2.2deg) translateY(-4%); }
+}
+
+/* paid — one celebration: bounce + glow pulse, ~2s, then settled. */
+.mascot--paid .mascot-float { animation: mascot-paid 2s ease-out 1 both; }
+.mascot--paid .mascot-stack { animation: mascot-paid-glow 2s ease-out 1 both; }
+@keyframes mascot-paid {
+  0% { transform: translateY(0) scale(1); }
+  22% { transform: translateY(-11%) scale(1.06); }
+  45% { transform: translateY(0) scale(1.02); }
+  65% { transform: translateY(-5%) scale(1.03); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes mascot-paid-glow {
+  0% { box-shadow: 0 0 0 0 rgba(98, 192, 115, 0); }
+  25% { box-shadow: 0 0 18px 3px rgba(98, 192, 115, 0.55); }
+  100% { box-shadow: 0 0 0 0 rgba(98, 192, 115, 0); }
+}
+
+/* pinkslip — a short shake and the colour drains while it lasts. */
+.mascot--pinkslip .mascot-float { animation: mascot-shake 0.45s ease-in-out 4; }
+.mascot--pinkslip .mascot-stack img { filter: saturate(0.3); }
+@keyframes mascot-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4%); }
+  45% { transform: translateX(3.5%); }
+  70% { transform: translateX(-2.5%); }
+  90% { transform: translateX(1.5%); }
+}
+
+/* auto — an expanding ring + a pulsing dot: the floor runs itself. */
+.mascot--auto::after {
+  content: ""; position: absolute; inset: -5px; border-radius: 28%;
+  border: 2px solid rgba(204, 120, 92, 0.8); pointer-events: none;
+  animation: mascot-ring 1.8s ease-out infinite;
+}
+@keyframes mascot-ring {
+  0% { transform: scale(0.96); opacity: 0.9; }
+  100% { transform: scale(1.1); opacity: 0; }
+}
+.mascot-auto-dot {
+  position: absolute; top: -2px; right: -2px; z-index: 1;
+  width: 26%; height: 26%; min-width: 8px; min-height: 8px;
+  border-radius: 50%; background: #cc785c;
+  border: 2px solid rgba(24, 23, 21, 0.9);
+  animation: mascot-dot 1.8s ease-in-out infinite;
+}
+@keyframes mascot-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* hover (landing hero) — bounce on top of the resting pose. */
+.mascot--hover .mascot-float { animation: mascot-hover 0.55s ease-out 1; }
+@keyframes mascot-hover {
+  0% { transform: translateY(0) scale(1); }
+  40% { transform: translateY(-6%) scale(1.045); }
+  100% { transform: translateY(0) scale(1.02); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mascot-float, .mascot-stack, .mascot-auto-dot { animation: none !important; }
+  .mascot--auto::after { animation: none !important; opacity: 0.55; }
+  .mascot-stack img { transition: none; }
+}
+

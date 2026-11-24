@@ -10,6 +10,7 @@
 
 import { useEffect, useRef } from "react";
 import type { PayrollPayload, PayrollRow } from "../lib/types";
+import Mascot from "./Mascot";
 import { credits, pick, signedCredits } from "../lib/api";
 import { Button } from "../vendor/ao/button";
 
@@ -65,8 +66,7 @@ export default function PayrollDialog({
     >
       <div className="border-b border-border px-6 pb-4 pt-5" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start gap-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/mascot/payroll.webp" alt="" aria-hidden="true" className="size-14 shrink-0 rounded-lg border border-border object-cover" />
+          <Mascot state="paid" size={56} />
           <div className="min-w-0">
             <p className="text-2xs font-semibold uppercase tracking-[0.14em] text-brand-logo-text">Payroll statement</p>
             <h2 id="payroll-title" className="font-display mt-1 text-[26px] leading-tight">

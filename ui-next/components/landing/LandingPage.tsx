@@ -5,6 +5,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import Mascot from "../Mascot";
 
 const Lottie = dynamic(() => import("lottie-react"), { ssr: false });
 
@@ -87,6 +88,7 @@ const DEPTS = [
   { name: "SDR", chip: "LIVE", cls: "live", d: "Account research scored against a published rubric, and outreach drafts. Drafts only — there is no send tool; sending stays human.", sys: "workplace · CRM via Synapse" },
   { name: "Engineering", chip: "LIVE", cls: "live", d: "Ticket work on your repository through Synapse tools, with CI as the deterministic check. Workers open PRs; a human merges.", sys: "workplace · Repo via Synapse" },
   { name: "HR", chip: "LIVE", cls: "live", d: "Screening against a published rubric, interview scheduling and onboarding paperwork. Hire and reject decisions stay with humans — no such tool exists.", sys: "workplace · HR desk via Synapse" },
+  { name: "SEO", chip: "LIVE", cls: "live", d: "On-page audits recomputed from live page data, keyword tracking and content briefs. Analysis and drafts only — there is no publish tool; applying a brief stays human.", sys: "workplace · SEODash via Synapse" },
 ];
 
 const TIERS = [
@@ -205,6 +207,13 @@ export default function LandingPage() {
         y: 36, opacity: 0, duration: 0.85, stagger: 0.12, ease: "power3.out",
         scrollTrigger: { trigger: ".lp-bento", start: "top 84%", once: true },
       });
+      /* The payroll Foreman pops in as the bento arrives — a small
+         back-eased overshoot on the avatar itself (its CSS paid
+         celebration plays underneath on the inner layers). */
+      gsap.from(".lp-bento-mascot", {
+        scale: 0.5, rotation: -10, opacity: 0, duration: 0.8, ease: "back.out(1.8)",
+        scrollTrigger: { trigger: ".lp-bento", start: "top 84%", once: true },
+      });
       /* Event-stream bars grow as the trace plays. */
       gsap.from(".tl-bar", {
         scaleX: 0, duration: 0.7, stagger: 0.05, ease: "power2.out",
@@ -311,10 +320,15 @@ export default function LandingPage() {
             <Lottie animationData={markData} loop autoplay style={{ width: 92, height: 92 }} />
           ) : null}
         </div>
-        {/* The Foreman — the floor's mascot, framed as product artwork */}
+        {/* The Foreman — the floor's mascot as a living avatar:
+            idle float at rest, a bounce on hover (see Mascot). */}
         <figure className="lp-foreman">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/mascot/foreman.webp" alt="The Foreman, THE FLOOR's mascot — a clay-orange robot holding the shift ledger" />
+          <Mascot
+            state="idle"
+            hoverable
+            size={288}
+            label="The Foreman, THE FLOOR's mascot — a clay-orange robot holding the shift ledger"
+          />
           <figcaption>The Foreman — runs this floor</figcaption>
         </figure>
         <div className="lp-hero-inner">
@@ -444,8 +458,7 @@ export default function LandingPage() {
                   <h3>Payroll</h3>
                   <p className="card-sub">cycle 1 · net per agent · credits</p>
                 </div>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img className="lp-mascot-sm" src="/mascot/payroll.webp" alt="" aria-hidden="true" />
+                <Mascot state="paid" size={56} className="lp-bento-mascot" label="" />
               </div>
               {PAYROLL.map((r) => (
                 <div className="pay-row" key={r.who}>
@@ -546,7 +559,7 @@ export default function LandingPage() {
           <h2 className="lp-h2" data-reveal>One floor. Every function.</h2>
           <p className="lp-lede" data-reveal>
             A department exists where a workplace exists: one real system, onboarded by Synapse,
-            with its tool allowlist as the department charter. All six departments are live today —
+            with its tool allowlist as the department charter. All seven departments are live today —
             the same crew bids across every one of them, and every job clears the same review,
             appeal and payroll machinery.
           </p>
@@ -609,8 +622,7 @@ export default function LandingPage() {
       <footer className="lp-footer">
         <div className="lp-wrap">
           <div className="lp-footer-brand">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img className="lp-mascot-md" src="/mascot/working.webp" alt="" aria-hidden="true" />
+            <Mascot state="idle" size={64} label="" />
             <p className="tag">Every agent has a price. Every price has a consequence.</p>
           </div>
           <div className="lp-footer-row">
