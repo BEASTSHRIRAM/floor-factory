@@ -4,6 +4,8 @@ Serves the mission-control UI's data needs and the demo controls:
 
     GET  /health                  liveness + target-system reachability
     GET  /state/agents            roster (incl. fired) with balances
+    GET  /agents/{id}/harness     one agent's composed harness (charter,
+                                  tools, playbooks, traits, lessons)
     GET  /state/jobs              jobs with bids + work orders embedded
     GET  /state/ledger            append-only ledger, newest first (?limit=)
     GET  /state/events            stored events (?after_seq=&limit=)
@@ -19,6 +21,23 @@ Serves the mission-control UI's data needs and the demo controls:
     POST /auto/pause              pause auto-run at the next cycle boundary
     POST /auto/stop               stop auto-run at the next cycle boundary
     GET  /auto/status             auto-run state only
+    GET  /connections/status      connection providers + configuration
+    GET  /connections/providers/{name}/health
+                                  structured provider health (composio
+                                  without a key -> not_configured, named
+                                  missing pieces; never faked)
+    GET  /connections             connections + grants (connections.py)
+    POST /connections             create a connection (422 if provider
+                                  is unconfigured — never faked)
+    POST /connections/{id}/grants grant a connection tool to a department
+    POST /intake/events           external event -> Engineering job ->
+                                  outbound Done + comment on completion
+    POST /intake/{connection_id}  external issue event {external_id,
+                                  title, body, severity} -> floor job
+                                  (budget from the severity map, deduped
+                                  by external_id) -> issue closed with a
+                                  resolution comment, or a failure
+                                  comment if the job fails
 
 Floor modes are documented in docs/MODES.md: manual = writes wait for a
 human at the confirmation gate; auto = the floor runs itself inside a
@@ -55,6 +74,8 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from orchestrator import departments as floor_departments  # noqa: E402
 from orchestrator import engine as floor_engine  # noqa: E402
+from orchestrator import router as floor_router  # noqa: E402
+from orchestrator import harness as floor_harness  # noqa: E402
 from orchestrator import mode as floor_mode  # noqa: E402
 from orchestrator import tools as floor_tools  # noqa: E402
 
@@ -77,6 +98,7 @@ TARGETS = {
     "sdr": (os.environ.get("SDR_URL", "http://localhost:8105").rstrip("/"), REPO_ROOT / "targets" / "sdr"),
     "engineering": (os.environ.get("ENGINEERING_URL", "http://localhost:8106").rstrip("/"), REPO_ROOT / "targets" / "engineering"),
     "hrdesk": (os.environ.get("HRDESK_URL", "http://localhost:8107").rstrip("/"), REPO_ROOT / "targets" / "hrdesk"),
+    "seo": (os.environ.get("SEO_URL", "http://localhost:8109").rstrip("/"), REPO_ROOT / "targets" / "seo"),
 }
 
 # Job title -> (department, department_label) from the registered
@@ -351,6 +373,52 @@ def state_agents() -> dict:
                 (a["id"],)).fetchone()
             a["balance_credits"] = row["balance_after"] if row else 0
         return {"agents": agents}
+    finally:
+        conn.close()
+
+
+@app.get("/agents/{agent_id}/harness")
+def agent_harness(agent_id: int) -> dict:
+    """The composed harness for one agent (orchestrator/harness.py):
+    charter + hard rules, tool allowlist, per-family playbooks, traits,
+    settings, and the lineage's lessons memory (count + latest)."""
+    conn = _conn()
+    try:
+        agent = ECO.get_agent(conn, agent_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail=f"no agent {agent_id}")
+        h = floor_harness.harness_for(agent)
+        latest = floor_harness.lessons_for(conn, agent_id, limit=5)
+        return {
+            "agent": {"id": agent["id"], "name": agent["name"],
+                      "role": agent["role"], "status": agent["status"],
+                      "generation": agent["generation"],
+                      "parent_agent_id": agent["parent_agent_id"],
+                      "mutation_note": agent["mutation_note"],
+                      "reputation": agent["reputation"]},
+            "harness": {
+                "department": h.department,
+                "role_label": h.role_label,
+                "charter": h.charter,
+                "charter_summary": h.charter.split("\n")[0],
+                "hard_rules": list(h.hard_rules),
+                "traits": {k: (sorted(v) if isinstance(v, (set, frozenset)) else v)
+                           for k, v in h.traits.items()},
+                "settings": h.settings,
+                "model_tier": h.model_tier,
+                "tools": {server: h.tool_names(server)
+                          for server in floor_harness.ALL_SERVERS
+                          if h.tool_names(server)},
+                "tool_count": len(h.tools),
+                "write_tools": [f"{s}:{t}" for s, t in h.write_tools()],
+                "playbooks": {fam.key: floor_harness.playbook_for(agent, fam)
+                              for fam in floor_engine.JOB_FAMILIES},
+            },
+            "lessons": {
+                "count": floor_harness.lesson_count(conn, agent_id),
+                "latest": latest,
+            },
+        }
     finally:
         conn.close()
 
@@ -663,6 +731,552 @@ async def auto_stop(request: Request) -> dict:
             "spent_credits": _auto_public()["spent_credits"],
             "budget_cap_credits": _auto_public()["budget_cap_credits"]})
     return _auto_public()
+
+
+# ---------------------------------------------------------------------------
+# connections layer + intake router (orchestrator/connections.py,
+# DESIGN_NOTES §2 + §3)
+# ---------------------------------------------------------------------------
+
+from orchestrator import connections as floor_connections  # noqa: E402
+
+_connections_store = floor_connections.Store()
+
+
+def _public_connection(row: dict) -> dict:
+    out = dict(row)
+    out["test_only"] = bool(out.get("test_only"))
+    # "" in the store means NO fixed department mapping (the COO router
+    # decides per intake item); surface that as null, not an empty name.
+    out["department"] = out.get("department") or None
+    return out
+
+
+@app.get("/connections/status")
+def connections_status() -> dict:
+    """Provider configuration status. Composio reports unconfigured
+    (never faked) until COMPOSIO_API_KEY is set on this server."""
+    return {"providers": floor_connections.provider_statuses()}
+
+
+@app.get("/connections")
+def connections_list() -> dict:
+    return {
+        "providers": floor_connections.provider_statuses(),
+        "connections": [_public_connection(c)
+                        for c in _connections_store.list_connections()],
+        "grants": _connections_store.list_grants(),
+    }
+
+
+@app.post("/connections")
+async def connections_create(request: Request) -> dict:
+    body = await _json_body(request)
+    try:
+        conn = floor_connections.create_connection(
+            _connections_store,
+            provider_name=str(body.get("provider", "")),
+            app=str(body.get("app", "")),
+            label=str(body.get("label", "")),
+            auth_ref=body.get("auth_ref"),
+            department=(str(body["department"])
+                        if body.get("department") else None))
+    except floor_connections.ConnectionNotConfigured as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _emit_api_event("connection.created", {
+        "connection_id": conn["id"], "provider": conn["provider"],
+        "app": conn["app"], "test_only": conn["test_only"]})
+    return {"connection": _public_connection(conn)}
+
+
+@app.delete("/connections/{connection_id}")
+def connections_delete(connection_id: str) -> dict:
+    if not _connections_store.delete_connection(connection_id):
+        raise HTTPException(status_code=404, detail="unknown connection")
+    _emit_api_event("connection.deleted", {"connection_id": connection_id})
+    return {"deleted": connection_id}
+
+
+@app.get("/connections/providers/{name}/health")
+def connections_provider_health(name: str) -> dict:
+    """Structured provider health. For composio without
+    COMPOSIO_API_KEY: {"status": "not_configured", "missing": [...]} —
+    the exact gap, machine-readable, never a fake success."""
+    try:
+        return floor_connections.provider_health(name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/connections/{connection_id}/tools")
+def connections_tools(connection_id: str) -> dict:
+    conn = _connections_store.get_connection(connection_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail="unknown connection")
+    provider = floor_connections.get_provider(conn["provider"])
+    return {"connection_id": connection_id, "app": conn["app"],
+            "provider": conn["provider"],
+            "tools": provider.tools(conn["app"]),
+            "grants": _connections_store.list_grants(connection_id)}
+
+
+@app.get("/connections/{connection_id}/issues")
+def connections_issues(connection_id: str) -> dict:
+    """Issues in a connection's store (local providers only — a real
+    provider's issues live in the real app, not here)."""
+    conn = _connections_store.get_connection(connection_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail="unknown connection")
+    if conn["provider"] not in ("local_test", "localdesk"):
+        raise HTTPException(
+            status_code=422,
+            detail="issue listing is available for the local providers "
+                   "only; a real provider's issues live in the real app")
+    provider = floor_connections.get_provider(conn["provider"])
+    return provider.call(_connections_store, conn, "list_issues", {})
+
+
+@app.post("/connections/{connection_id}/grants")
+async def connections_grant(connection_id: str, request: Request) -> dict:
+    conn = _connections_store.get_connection(connection_id)
+    if conn is None:
+        raise HTTPException(status_code=404, detail="unknown connection")
+    body = await _json_body(request)
+    try:
+        grant = floor_connections.grant_tool(
+            _connections_store, conn,
+            department=str(body.get("department", "")),
+            tool_name=str(body.get("tool_name", "")),
+            granted_by=str(body.get("by", "human")))
+    except (ValueError, floor_connections.ConnectionNotConfigured) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _emit_api_event("connection.granted", {
+        "connection_id": connection_id, "department": grant["department"],
+        "tool_name": grant["tool_name"], "test_only": bool(conn["test_only"])})
+    return {"grant": grant}
+
+
+@app.delete("/connections/{connection_id}/grants")
+def connections_revoke(connection_id: str,
+                       department: str = Query(...),
+                       tool_name: str = Query(...)) -> dict:
+    if _connections_store.get_connection(connection_id) is None:
+        raise HTTPException(status_code=404, detail="unknown connection")
+    if not _connections_store.revoke(connection_id, department, tool_name):
+        raise HTTPException(status_code=404, detail="no such grant")
+    return {"revoked": {"connection_id": connection_id,
+                        "department": department, "tool_name": tool_name}}
+
+
+def _close_intake_loop(store, conn_row, event_id, external_id,
+                       result, wo_id, paid) -> dict:
+    """Loop closure for an intake-born job (DESIGN_NOTES §3).
+
+    Accepted -> the source issue transitions to Done with a resolution
+    comment (winner, verdict, credits spent) and ``intake.closed``
+    fires. Failed -> the source issue gets a comment saying the floor
+    could not fix it — no silent drops — and ``intake.closed`` fires
+    with the failed status. Outbound failures land in the event's
+    detail, never hidden. Returns the updated intake event row."""
+    provider = floor_connections.get_provider(conn_row["provider"])
+    accepted = str(result["verdict"]).startswith("accept")
+    sim_note = (" [SIMULATOR/TEST connection — this update lives in the "
+                "local stand-in store, not a real external system.]"
+                if conn_row["test_only"] else "")
+    detail = None
+    try:
+        if accepted:
+            provider.transition_issue(store, conn_row, int(external_id),
+                                      "Done")
+            provider.call(store, conn_row, "add_comment", {
+                "issue_id": int(external_id), "author": "THE FLOOR",
+                "body": (f"Resolved by THE FLOOR (job #{result['job_id']}): "
+                         f"{result['winner']} investigated this report and "
+                         f"left a resolution comment on this issue. "
+                         f"Verdict: {result['verdict']}"
+                         + (f"; paid ₡{paid} for the work."
+                            if paid is not None else ".")
+                         + " Closing this issue automatically." + sim_note)})
+            detail = ("source issue transitioned to Done with a "
+                      "resolution comment")
+        else:
+            provider.call(store, conn_row, "add_comment", {
+                "issue_id": int(external_id), "author": "THE FLOOR",
+                "body": (f"THE FLOOR could not resolve this report "
+                         f"(job #{result['job_id']}, verdict: "
+                         f"{result['verdict']}). No fix was applied; "
+                         f"the issue stays open for a human." + sim_note)})
+            detail = "job failed; failure comment left on the source issue"
+    except Exception as exc:  # noqa: BLE001 — reported, not hidden
+        detail = f"outbound closure failed: {exc}"
+    event = store.update_intake_event(
+        event_id, job_id=result["job_id"], work_order_id=wo_id,
+        winner=result["winner"], verdict=result["verdict"],
+        paid_credits=paid,
+        status="completed" if accepted else "failed", detail=detail)
+    payload = {"intake_event_id": event_id,
+               "connection_id": conn_row["id"],
+               "external_issue_id": str(external_id),
+               "job_id": result["job_id"], "winner": result["winner"],
+               "verdict": result["verdict"], "paid_credits": paid,
+               "status": event["status"]}
+    _emit_api_event("intake.closed", payload)
+    _emit_api_event("intake.completed", payload)
+    return event
+
+
+@app.post("/route")
+async def route_dry_run(request: Request) -> dict:
+    """COO router, dry-run (orchestrator/router.py): given a work item
+    {title, body, source?}, return the routing decision — department,
+    matched signals, confidence, per-department scores — WITHOUT
+    creating a job. The decision is also emitted as a work.routed
+    event so it shows on the floor's event stream. This is the same
+    router the intake path uses when a connection has no fixed
+    department mapping."""
+    body = await _json_body(request)
+    title = str(body.get("title", "")).strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title is required")
+    return floor_router.route_work_item(
+        {"title": title, "body": str(body.get("body", "")),
+         "source": str(body.get("source", ""))},
+        emit=_emit_api_event)
+
+
+@app.get("/intake/events")
+def intake_events_list(limit: int = Query(50, ge=1, le=200)) -> dict:
+    return {"events": _connections_store.list_intake_events(limit)}
+
+
+@app.post("/intake/events")
+async def intake_event_create(request: Request) -> dict:
+    """Intake router (DESIGN_NOTES §3): an external event becomes a
+    floor job in Engineering, runs through the existing economy
+    (bidding → execution through granted connection tools → review →
+    payment at accept), and on completion an outbound action fires back
+    through the provider (source issue → Done + completion comment).
+
+    Synchronous, like /run/shift?wait=true. In manual floor mode the
+    job's connection writes wait at the confirmation gate like every
+    other write (resolve them via POST /approvals/{id}).
+    """
+    body = await _json_body(request)
+    event_type = str(body.get("event_type", "issue_created"))
+    if event_type != "issue_created":
+        raise HTTPException(status_code=422,
+                            detail=f"unsupported event_type {event_type!r} "
+                                   "(only issue_created is routed today)")
+    title = str(body.get("title", "")).strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title is required")
+    text = str(body.get("body", ""))
+    store = _connections_store
+    conn_row = None
+    if body.get("connection_id"):
+        conn_row = store.get_connection(str(body["connection_id"]))
+        if conn_row is None:
+            raise HTTPException(status_code=404, detail="unknown connection_id")
+    else:
+        for c in store.list_connections():
+            if c["provider"] == "local_test" and c["app"] == "jira":
+                conn_row = c
+                break
+    if conn_row is None:
+        raise HTTPException(
+            status_code=422,
+            detail="no connection to route this event through — create one "
+                   "first (POST /connections)")
+    provider = floor_connections.get_provider(conn_row["provider"])
+    catalog = {t["name"] for t in provider.tools(conn_row["app"])}
+    missing = {"get_issue", "add_comment"} - catalog
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"connection {conn_row['id']} cannot serve intake jobs: "
+                   f"its tool catalog lacks {sorted(missing)} (the intake "
+                   "executor works through the Jira-like get_issue / "
+                   "add_comment contract; the local_test provider provides "
+                   "it today)")
+    if _auto_public()["status"] == "running":
+        raise HTTPException(status_code=409,
+                            detail="auto-run is active; stop it before intake")
+    if not _shift_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="a shift is already running")
+    _shift_state["running"] = True
+    try:
+        # The source issue: reuse the referenced one, or create it in the
+        # provider's store from the event payload (system action).
+        external_id = body.get("external_id")
+        if external_id is None:
+            issue = provider.call(store, conn_row, "create_issue", {
+                "title": title, "body": text, "source": "intake"})
+            external_id = issue["id"]
+        event = store.create_intake_event(
+            connection_id=conn_row["id"], provider=conn_row["provider"],
+            app=conn_row["app"], event_type=event_type,
+            external_issue_id=str(external_id), title=title, body=text,
+            department="engineering",
+            budget_credits=int(body.get("budget_credits") or 150),
+            status="running")
+        _emit_api_event("intake.received", {
+            "intake_event_id": event["id"], "connection_id": conn_row["id"],
+            "provider": conn_row["provider"], "app": conn_row["app"],
+            "external_issue_id": str(external_id), "title": title,
+            "test_only": bool(conn_row["test_only"])})
+        cycle_no = _next_cycle_no()
+        requested_budget = int(body.get("budget_credits") or 150)
+        # engine.run_job posts cycle>=2 jobs as audit re-checks at 60%
+        # budget; scale the family budget so the POSTED budget equals
+        # the requested one (title prefix is the engine's, see report).
+        family_budget = (requested_budget if cycle_no < 2
+                         else round(requested_budget / 0.6))
+        family = floor_engine.Family(
+            key=f"intake_bugfix_{event['id']}",
+            title=f"Fix reported bug: {title}",
+            brief=(f"A bug was reported through the connected "
+                   f"{conn_row['app']} app (issue #{external_id}): {text} "
+                   f"Read the source issue through the granted connection "
+                   f"tools, apply the fix, and leave a resolution comment "
+                   f"on the issue."),
+            budget=family_budget,
+            criteria=floor_connections.INTAKE_CRITERIA,
+            department="engineering", server="connections",
+            execute=floor_connections.intake_execute,
+            check=floor_connections.intake_check)
+        floor_connections.register_intake_context(
+            family.key, store=store, connection=conn_row,
+            external_issue_id=external_id)
+        conn = _conn()
+        try:
+            reviewers = [a for a in ECO.list_agents(conn, status="active")
+                         if a["role"] == "reviewer"]
+        finally:
+            conn.close()
+        engine = floor_engine.FloorEngine()
+        try:
+            result = engine.run_job(family, cycle_no, reviewers)
+        except Exception as exc:  # noqa: BLE001 — event records the failure
+            store.update_intake_event(
+                event["id"], status="failed",
+                detail=f"job run failed: {type(exc).__name__}: {exc}")
+            _emit_api_event("intake.completed", {
+                "intake_event_id": event["id"], "status": "failed",
+                "error": str(exc)[:300]})
+            raise HTTPException(
+                status_code=500,
+                detail=f"intake job failed: {type(exc).__name__}: {exc}") from exc
+        finally:
+            engine.close()
+        conn = _conn()
+        try:
+            wo_row = conn.execute(
+                "SELECT id, agent_id FROM work_orders WHERE job_id = ?"
+                " ORDER BY id DESC LIMIT 1", (result["job_id"],)).fetchone()
+            wo_id = wo_row["id"] if wo_row else None
+            paid = None
+            if wo_id is not None:
+                row = conn.execute(
+                    "SELECT amount_credits FROM ledger WHERE kind = 'earning'"
+                    " AND ref_type = 'work_order' AND ref_id = ?",
+                    (wo_id,)).fetchone()
+                paid = row["amount_credits"] if row else None
+        finally:
+            conn.close()
+        event = _close_intake_loop(store, conn_row, event["id"],
+                                   external_id, result, wo_id, paid)
+        return {"event": event, "result": result}
+    finally:
+        _shift_state["running"] = False
+        _shift_lock.release()
+
+
+@app.post("/intake/{connection_id}")
+async def intake_issue_event(connection_id: str, request: Request) -> dict:
+    """Intake, addressed form (docs/CONNECTIONS.md): an external issue
+    event {external_id, title, body, severity} on ONE connection
+    becomes a floor job.
+
+    Department resolution: body.department wins, then the connection's
+    fixed mapping; when neither names one, the COO router
+    (orchestrator/router.py) routes from the item's text — deterministic
+    rules, work.routed event — instead of a hardcoded default. The
+    budget comes from the severity -> credits map
+    (body.budget_credits overrides). The same external_id on the same
+    connection NEVER creates a second job — the original intake event
+    is returned with deduped=true. On completion the loop closes back
+    through the provider (see _close_intake_loop). Synchronous, like
+    /intake/events; in manual floor mode the job's connection writes
+    wait at the confirmation gate like every other write.
+    """
+    store = _connections_store
+    conn_row = store.get_connection(connection_id)
+    if conn_row is None:
+        raise HTTPException(status_code=404, detail="unknown connection")
+    provider = floor_connections.get_provider(conn_row["provider"])
+    ok, why = provider.configured()
+    if not ok:
+        return JSONResponse(status_code=422, content={"detail": {
+            "error": "not_configured", "provider": conn_row["provider"],
+            "detail": why}})
+    body = await _json_body(request)
+    title = str(body.get("title", "")).strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="title is required")
+    text = str(body.get("body", ""))
+    severity = str(body.get("severity", "medium")).lower()
+    if severity not in floor_connections.SEVERITY_BUDGET:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown severity {severity!r} (one of "
+                   f"{', '.join(floor_connections.SEVERITY_BUDGET)})")
+    # Department resolution, in precedence order: the event body wins,
+    # then the connection's fixed mapping, then — when neither names a
+    # department — the COO router (orchestrator/router.py) decides from
+    # the item's text and says why (work.routed event).
+    routing = None
+    if body.get("department"):
+        department = str(body["department"])
+    elif conn_row.get("department"):
+        department = str(conn_row["department"])
+    else:
+        routing = floor_router.route_work_item(
+            {"title": title, "body": text, "source": conn_row["app"]},
+            emit=_emit_api_event)
+        department = routing["department"]
+    if department not in floor_connections.DEPARTMENTS:
+        raise HTTPException(status_code=422,
+                            detail=f"unknown department {department!r}")
+    external_id = body.get("external_id")
+
+    # Dedupe: one external issue -> at most one floor job, ever.
+    if external_id is not None:
+        existing = store.find_intake_by_external(connection_id, external_id)
+        if existing is not None:
+            return {"event": existing, "result": None, "deduped": True}
+
+    catalog = {t["name"] for t in provider.tools(conn_row["app"])}
+    missing = {"get_issue", "add_comment"} - catalog
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"connection {connection_id} cannot serve intake jobs: "
+                   f"its tool catalog lacks {sorted(missing)}")
+    missing_grants = [t for t in ("get_issue", "add_comment")
+                      if not store.has_grant(connection_id, department, t)]
+    if missing_grants:
+        raise HTTPException(
+            status_code=422,
+            detail=f"department {department!r} holds no grant for "
+                   f"{missing_grants} on this connection; grant them "
+                   f"first (POST /connections/{connection_id}/grants)")
+    if _auto_public()["status"] == "running":
+        raise HTTPException(status_code=409,
+                            detail="auto-run is active; stop it before intake")
+    if not _shift_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409,
+                            detail="a shift is already running")
+    _shift_state["running"] = True
+    try:
+        # The source issue must exist in the provider's system: reuse
+        # the referenced one, or create it from the event payload.
+        if external_id is not None:
+            try:
+                provider.get_issue(store, conn_row, int(external_id))
+            except Exception:  # noqa: BLE001 — not there: create it
+                issue = provider.call(store, conn_row, "create_issue", {
+                    "title": title, "body": text, "severity": severity,
+                    "source": "intake"})
+                external_id = issue["id"]
+        else:
+            issue = provider.call(store, conn_row, "create_issue", {
+                "title": title, "body": text, "severity": severity,
+                "source": "intake"})
+            external_id = issue["id"]
+            existing = store.find_intake_by_external(connection_id,
+                                                     external_id)
+            if existing is not None:
+                return {"event": existing, "result": None, "deduped": True}
+        requested_budget = int(body.get("budget_credits")
+                               or floor_connections.severity_budget(severity))
+        event = store.create_intake_event(
+            connection_id=conn_row["id"], provider=conn_row["provider"],
+            app=conn_row["app"], event_type="issue_created",
+            external_issue_id=str(external_id), title=title, body=text,
+            department=department, budget_credits=requested_budget,
+            severity=severity, status="running")
+        cycle_no = _next_cycle_no()
+        # engine.run_job posts cycle>=2 jobs as audit re-checks at 60%
+        # budget; scale so the POSTED budget equals the requested one.
+        family_budget = (requested_budget if cycle_no < 2
+                         else round(requested_budget / 0.6))
+        family_key = f"intake_bugfix_{event['id']}"
+        criteria = [
+            f"External issue #{external_id} on connection "
+            f"{conn_row['id']} ({conn_row['provider']}/{conn_row['app']}) "
+            f"was read by the awarded worker through the granted "
+            f"connection tool (get_issue)",
+            f"A resolution comment was added to external issue "
+            f"#{external_id} by the awarded worker through the granted "
+            f"connection tool (add_comment)",
+        ]
+        family = floor_engine.Family(
+            key=family_key,
+            title=f"Fix reported bug: {title}",
+            brief=(f"A bug was reported through the connected "
+                   f"{conn_row['app']} app (issue #{external_id}, "
+                   f"severity {severity}): {text} Read the source issue "
+                   f"through the granted connection tools, apply the "
+                   f"fix, and leave a resolution comment on the issue."),
+            budget=family_budget, criteria=criteria,
+            department=department, server="connections",
+            execute=floor_connections.intake_execute,
+            check=floor_connections.intake_check)
+        floor_connections.register_intake_context(
+            family.key, store=store, connection=conn_row,
+            external_issue_id=external_id)
+        _emit_api_event("intake.job_created", {
+            "intake_event_id": event["id"], "connection_id": conn_row["id"],
+            "provider": conn_row["provider"], "app": conn_row["app"],
+            "external_issue_id": str(external_id), "title": title,
+            "department": department, "severity": severity,
+            "routing": routing,
+            "budget_credits": requested_budget, "family": family_key,
+            "test_only": bool(conn_row["test_only"])})
+        conn = _conn()
+        try:
+            reviewers = [a for a in ECO.list_agents(conn, status="active")
+                         if a["role"] == "reviewer"]
+        finally:
+            conn.close()
+        engine = floor_engine.FloorEngine()
+        try:
+            result = engine.run_job(family, cycle_no, reviewers)
+        finally:
+            engine.close()
+        conn = _conn()
+        try:
+            wo_row = conn.execute(
+                "SELECT id, agent_id FROM work_orders WHERE job_id = ?"
+                " ORDER BY id DESC LIMIT 1", (result["job_id"],)).fetchone()
+            wo_id = wo_row["id"] if wo_row else None
+            paid = None
+            if wo_id is not None:
+                row = conn.execute(
+                    "SELECT amount_credits FROM ledger WHERE kind = 'earning'"
+                    " AND ref_type = 'work_order' AND ref_id = ?",
+                    (wo_id,)).fetchone()
+                paid = row["amount_credits"] if row else None
+        finally:
+            conn.close()
+        event = _close_intake_loop(store, conn_row, event["id"],
+                                   external_id, result, wo_id, paid)
+        return {"event": event, "result": result}
+    finally:
+        _shift_state["running"] = False
+        _shift_lock.release()
 
 
 # ---------------------------------------------------------------------------

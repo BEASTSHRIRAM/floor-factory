@@ -42,6 +42,12 @@ Headless alternative (no API): `python -m orchestrator.engine --cycles 2 --reset
 | `POST /auto/pause` | pause auto-run at the next cycle boundary |
 | `POST /auto/stop` | stop auto-run at the next cycle boundary |
 | `GET /auto/status` | auto-run state only |
+| `GET /connections` / `POST /connections` | connection registry (providers: composio — key-gated, never faked; localdesk — ExtDesk simulator; local_test) |
+| `GET /connections/providers/{name}/health` | structured provider health (`not_configured` names what's missing) |
+| `POST /connections/{id}/grants` | grant a connection tool to a department |
+| `GET /connections/{id}/issues` | issues on a local-provider connection |
+| `POST /intake/{connection_id}` | external issue event → floor job (severity→budget map, deduped) → issue Done + resolution comment (docs/CONNECTIONS.md) |
+| `POST /intake/events` | original intake route (same loop closure) |
 
 If `repo/ui/index.html` exists it is served at `/` (mounted last; API routes win).
 
