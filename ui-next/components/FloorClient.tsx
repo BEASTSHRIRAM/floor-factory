@@ -70,6 +70,7 @@ const DEPT_FILTERS: { key: string; label: string }[] = [
   { key: "sdr", label: "SDR" },
   { key: "engineering", label: "Engineering" },
   { key: "hr", label: "HR" },
+  { key: "seo", label: "SEO" },
 ];
 
 /* Mode switches (offline hero → replay, replay → live) are the two big
