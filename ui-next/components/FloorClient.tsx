@@ -5,11 +5,12 @@ import dynamic from "next/dynamic";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import Header, { type HeaderStats } from "./Header";
-import OrgChart from "./OrgChart";
+import Roster from "./Roster";
 import JobBoard, { type TickerItem } from "./JobBoard";
 import Feeds from "./Feeds";
+import Inspector from "./Inspector";
 import PayrollDialog from "./PayrollDialog";
-import type { Agent, FloorEvent, Job, LedgerRow, NarrationItem, PayrollPayload } from "../lib/types";
+import type { Agent, FloorEvent, Job, LedgerRow, NarrationItem, PayrollPayload, Presence } from "../lib/types";
 import {
   API_BASE,
   asArray,
@@ -58,6 +59,9 @@ export default function FloorClient() {
   const [toast, setToast] = useState<{ msg: string; error?: boolean } | null>(null);
   const [firedIds, setFiredIds] = useState<Set<string>>(new Set());
   const [hireIds, setHireIds] = useState<Set<string>>(new Set());
+  const [presence, setPresence] = useState<Record<string, Presence>>({});
+  const [paidFlash, setPaidFlash] = useState<Set<string>>(new Set());
+  const [selection, setSelection] = useState<{ kind: "job" | "agent"; id: string } | null>(null);
 
   const lastSeq = useRef(0);
   const keyRef = useRef(1);
@@ -65,6 +69,8 @@ export default function FloorClient() {
   const rootRef = useRef<HTMLDivElement>(null);
   const agentsRef = useRef<Agent[]>([]);
   agentsRef.current = agents;
+  const jobsRef = useRef<Job[]>([]);
+  jobsRef.current = jobs;
 
   /* GSAP entrance: header + panels fade/slide in once (transform/opacity
      only; skipped entirely under reduced motion). */
@@ -72,11 +78,11 @@ export default function FloorClient() {
     () => {
       if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
       gsap.from(".fx-entrance", {
-        y: 16,
+        y: 10,
         opacity: 0,
-        duration: 0.7,
+        duration: 0.4,
         ease: "power3.out",
-        stagger: 0.08,
+        stagger: 0.05,
         clearProps: "transform,opacity",
       });
     },
@@ -112,6 +118,61 @@ export default function FloorClient() {
     if (t) return String(t);
     const id = pick(p, "job_id");
     return id !== undefined ? `job ${id}` : "a job";
+  }, []);
+
+  /* ---------- live presence (derived from the event stream) ---------- */
+  const resolveAgentId = useCallback((p: Record<string, unknown>): string | undefined => {
+    const id = pick(p, "agent_id", "agent");
+    if (id !== undefined && agentsRef.current.some((a) => a.id === String(id))) return String(id);
+    // tool.executed names its actor under "worker" (e.g. "manager");
+    // match names case-insensitively, then fall back to role.
+    const name = pick(p, "agent_name", "name", "winner", "awarded_to", "worker", "actor");
+    if (name) {
+      const n = String(name).toLowerCase();
+      const found =
+        agentsRef.current.find((a) => a.name.toLowerCase() === n) ??
+        agentsRef.current.find((a) => String(a.role ?? "").toLowerCase() === n);
+      if (found) return found.id;
+    }
+    return id !== undefined ? String(id) : undefined;
+  }, []);
+
+  const workerIdForJob = useCallback((p: Record<string, unknown>): string | undefined => {
+    const jid = pick(p, "job_id", "job");
+    if (jid === undefined) return undefined;
+    const job = jobsRef.current.find((j) => j.id === String(jid));
+    if (!job?.winner) return undefined;
+    return agentsRef.current.find((a) => a.name === String(job.winner))?.id;
+  }, []);
+
+  /** Work-order-scoped events (work.submitted, appeal.*) carry only a
+   *  work_order_id; the owning job's work_orders name the agent. */
+  const workerIdForWorkOrder = useCallback((p: Record<string, unknown>): string | undefined => {
+    const woid = pick(p, "work_order_id");
+    if (woid === undefined) return undefined;
+    for (const j of jobsRef.current) {
+      const orders = (j.work_orders as Record<string, unknown>[] | undefined) ?? [];
+      const wo = orders.find((o) => String(o.id) === String(woid));
+      if (wo?.agent_id !== undefined) return String(wo.agent_id);
+    }
+    return undefined;
+  }, []);
+
+  const setAgentPresence = useCallback((id: string | undefined, next: Presence) => {
+    if (!id) return;
+    setPresence((prev) => (prev[id]?.state === next.state && prev[id]?.tool === next.tool ? prev : { ...prev, [id]: next }));
+  }, []);
+
+  const flashPaid = useCallback((id: string | undefined) => {
+    if (!id) return;
+    setPaidFlash((prev) => new Set(prev).add(id));
+    setTimeout(() => {
+      setPaidFlash((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+    }, 1300);
   }, []);
 
   /* ---------- snapshot ---------- */
@@ -216,6 +277,7 @@ export default function FloorClient() {
           const budget = pick(p, "budget_credits", "budget");
           narrate(text || `Manager posted "${jobTitleOf(p)}"${budget !== undefined ? ` at ${credits(budget)}` : ""}`);
           upsertJob({ ...p, status: (pick(p, "status") as string) || "open" });
+          setAgentPresence(resolveAgentId(p), { state: "working" });
           break;
         }
         case "bid.placed": {
@@ -233,6 +295,7 @@ export default function FloorClient() {
             ].slice(-24)
           );
           narrate(text || `${who} placed a sealed bid on "${jobTitleOf(p)}".`);
+          setAgentPresence(resolveAgentId(p), { state: "bidding" });
           const jid = pick(p, "job_id", "job");
           if (jid !== undefined) {
             setJobs((prev) =>
@@ -249,22 +312,29 @@ export default function FloorClient() {
           narrate(text || `${nameOf(p)} won "${jobTitleOf(p)}".`);
           if (pick(p, "job_id", "id") !== undefined)
             upsertJob({ id: pick(p, "job_id", "id"), status: "awarded", winner: nameOf(p) });
+          setAgentPresence(resolveAgentId(p), { state: "working" });
           break;
-        case "tool.executed":
+        case "tool.executed": {
           narrate(text || `${nameOf(p)} ran tool ${String(pick(p, "tool_name", "tool") ?? "")} on "${jobTitleOf(p)}".`);
+          const tool = pick(p, "tool_name", "tool");
+          setAgentPresence(resolveAgentId(p), { state: "working", tool: tool ? String(tool) : undefined });
           break;
+        }
         case "work.submitted":
           narrate(text || `${nameOf(p)} submitted work on "${jobTitleOf(p)}" for review.`);
           if (pick(p, "job_id", "id") !== undefined) upsertJob({ id: pick(p, "job_id", "id"), status: "in_review" });
+          setAgentPresence(resolveAgentId(p) ?? workerIdForJob(p) ?? workerIdForWorkOrder(p), { state: "review" });
           break;
         case "review.completed": {
           const verdict = pick(p, "verdict");
           const sev = pick(p, "severity");
           narrate(text || `Review complete on "${jobTitleOf(p)}" — ${verdict ?? ""}${sev ? ` (${sev})` : ""}.`);
+          setAgentPresence(resolveAgentId(p) ?? workerIdForJob(p) ?? workerIdForWorkOrder(p), { state: "idle" });
           break;
         }
         case "appeal.filed":
           narrate(text || `${nameOf(p)} is appealing the rejection on "${jobTitleOf(p)}"…`, "appeal");
+          setAgentPresence(resolveAgentId(p) ?? workerIdForJob(p) ?? workerIdForWorkOrder(p), { state: "appealing" });
           break;
         case "appeal.decided": {
           const upheld = pick(p, "upheld", "overturned");
@@ -276,11 +346,15 @@ export default function FloorClient() {
                 : "Appeal denied — the rejection stands."),
             "appeal"
           );
+          setAgentPresence(resolveAgentId(p) ?? workerIdForJob(p) ?? workerIdForWorkOrder(p), { state: "idle" });
           break;
         }
         case "payment.made": {
           const amt = pick(p, "amount_credits", "amount");
           narrate(text || `${nameOf(p)} was paid ${amt !== undefined ? credits(amt) : ""} for "${jobTitleOf(p)}".`);
+          const paidId = resolveAgentId(p) ?? workerIdForJob(p) ?? workerIdForWorkOrder(p);
+          flashPaid(paidId);
+          setAgentPresence(paidId, { state: "idle" });
           const row: LedgerRow = { ...(p as LedgerRow) };
           if (pick(row as Record<string, unknown>, "note", "reason") === undefined)
             row.note = `earning — ${jobTitleOf(p)} accepted`;
@@ -294,6 +368,7 @@ export default function FloorClient() {
           setBanner(true);
           setTimeout(() => setBanner(false), 6000);
           setPayroll(p as PayrollPayload);
+          setPresence({});
           void loadSnapshot();
           break;
         case "agent.fired": {
@@ -301,6 +376,7 @@ export default function FloorClient() {
           if (fid !== undefined) {
             setFiredIds((prev) => new Set(prev).add(String(fid)));
             setTimeout(() => setFiredIds(new Set()), 2500);
+            setAgentPresence(String(fid), { state: "fired" });
           }
           const who = nameOf(p);
           narrate(text || `PinkSlip: ${who} has been fired by the CFO.`, "pinkslip");
@@ -317,6 +393,7 @@ export default function FloorClient() {
           const mut = pick(p, "mutation_note", "mutation");
           narrate(text || `New hire: ${nameOf(p)}${mut ? ` — ${mut}` : ""}.`, "hire");
           upsertAgent({ ...p, id: hid, status: "idle" });
+          if (hid !== undefined) setAgentPresence(String(hid), { state: "idle" });
           break;
         }
         case "narration":
@@ -327,7 +404,7 @@ export default function FloorClient() {
           break;
       }
     },
-    [loadSnapshot, nameOf, jobTitleOf, narrate]
+    [loadSnapshot, nameOf, jobTitleOf, narrate, resolveAgentId, workerIdForJob, workerIdForWorkOrder, setAgentPresence, flashPaid]
   );
 
   useEffect(() => {
@@ -440,6 +517,9 @@ export default function FloorClient() {
       showToast("Demo reset to the seeded start state.");
       setFiredIds(new Set());
       setHireIds(new Set());
+      setPresence({});
+      setPaidFlash(new Set());
+      setSelection(null);
       setNarration([]);
       setTicker([]);
       setPinkSlips([]);
@@ -449,52 +529,87 @@ export default function FloorClient() {
     }
   }, [loadSnapshot, showToast]);
 
+  const selectedJob = selection?.kind === "job" ? jobs.find((j) => j.id === selection.id) ?? null : null;
+  const selectedAgent = selection?.kind === "agent" ? agents.find((a) => a.id === selection.id) ?? null : null;
+
   return (
-    <div ref={rootRef}>
-      <a className="skip-link" href="#layout">
-        Skip to mission control
-      </a>
-      <Header stats={stats} connected={connected} running={running} onRun={onRun} onReset={onReset} />
-
-      {/* Lightweight 3D floor strip — subtle, capped-cost, never the centrepiece. */}
-      <div className="floor-strip fx-entrance">
-        <FloorScene agents={agents} />
-      </div>
-
-      {banner && (
-        <div className="payroll-banner" role="alert">
-          PAYROLL — CYCLE CLOSED
-        </div>
-      )}
-      {!connected && (
-        <div className="waiting" role="status">
-          <div className="waiting-card">
-            <h2>Waiting for factory API</h2>
-            <p>
-              The mission control is live, but the factory API is not reachable yet. This page will
-              connect automatically as soon as the API starts.
-            </p>
-            <p className="waiting-sub">
-              Expected at <code>{API_BASE}</code> — <code>GET /state/agents</code>,{" "}
-              <code>GET /state/jobs</code>, <code>GET /state/ledger</code>, <code>GET /events</code>
-            </p>
-          </div>
-        </div>
-      )}
-
-      <main id="layout">
-        <OrgChart management={management} workers={workers} fired={fired} firedIds={firedIds} hireIds={hireIds} />
-        <JobBoard jobs={jobs} ticker={ticker} />
-        <Feeds
-          ledger={ledger}
-          narration={narration}
-          extraLedgerItems={pinkSlips.map((s) => (
-            <div className="feed-item pinkslip" key={s.key}>
-              <span className="why">{s.text}</span>
-            </div>
-          ))}
+    <>
+      <div ref={rootRef} className={`shell${selection ? " has-inspector" : ""}`}>
+        <a className="skip-link" href="#main">
+          Skip to mission control
+        </a>
+        <Header stats={stats} connected={connected} running={running} onRun={onRun} onReset={onReset} />
+        <Roster
+          management={management}
+          workers={workers}
+          fired={fired}
+          firedIds={firedIds}
+          hireIds={hireIds}
+          presence={presence}
+          paidFlash={paidFlash}
+          selectedId={selection?.kind === "agent" ? selection.id : null}
+          onSelect={(a) => setSelection({ kind: "agent", id: a.id })}
         />
-      </main>
+
+        <main className="main" id="main">
+          <div className="center-surface">
+            {/* The floor scene survives only as a slim ambient band at
+                the top of the center surface — the board owns the rest. */}
+            <div className="floor-band fx-entrance">
+              <FloorScene agents={agents} />
+            </div>
+            <div className="center-scroll">
+              {banner && (
+                <div className="payroll-banner" role="alert">
+                  Payroll — cycle closed
+                </div>
+              )}
+              {!connected && (
+                <div className="waiting" role="status">
+                  <div className="waiting-card">
+                    <h2>Waiting for factory API</h2>
+                    <p>
+                      The mission control is live, but the factory API is not reachable yet. This page will
+                      connect automatically as soon as the API starts.
+                    </p>
+                    <p className="waiting-sub">
+                      Expected at <code>{API_BASE}</code> — <code>GET /state/agents</code>,{" "}
+                      <code>GET /state/jobs</code>, <code>GET /state/ledger</code>, <code>GET /events</code>
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="center">
+                <JobBoard
+                  jobs={jobs}
+                  ticker={ticker}
+                  selectedId={selection?.kind === "job" ? selection.id : null}
+                  onSelect={(j) => setSelection({ kind: "job", id: j.id })}
+                />
+                <Feeds
+                  ledger={ledger}
+                  narration={narration}
+                  extraLedgerItems={pinkSlips.map((s) => (
+                    <div className="feed-item pinkslip" key={s.key}>
+                      <span className="why">{s.text}</span>
+                    </div>
+                  ))}
+                />
+              </div>
+            </div>
+          </div>
+        </main>
+
+        {selection && (
+          <Inspector
+            job={selectedJob}
+            agent={selectedAgent}
+            presence={selectedAgent ? presence[selectedAgent.id] : undefined}
+            onClose={() => setSelection(null)}
+          />
+        )}
+      </div>
 
       <PayrollDialog payroll={payroll} onClose={() => setPayroll(null)} />
       {toast && (
@@ -502,6 +617,6 @@ export default function FloorClient() {
           {toast.msg}
         </div>
       )}
-    </div>
+    </>
   );
 }

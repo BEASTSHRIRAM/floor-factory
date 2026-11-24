@@ -76,6 +76,18 @@ export function isManagement(a: Agent): boolean {
 export function normalizeJob(raw: unknown): Job {
   const j = (raw ?? {}) as Record<string, unknown>;
   const bids = Array.isArray(j.bids) ? (j.bids as Bid[]) : [];
+  // The snapshot carries no explicit winner; the winning work order's
+  // agent_id joined to that agent's bid yields the winner's name.
+  let winner = pick(j, "winner", "awarded_to", "assigned_to", "agent_name") as string | undefined;
+  if (!winner && Array.isArray(j.work_orders)) {
+    const orders = j.work_orders as Record<string, unknown>[];
+    const wo =
+      orders.find((o) => ["accepted", "appeal_accepted"].includes(String(o.status ?? ""))) ?? orders[0];
+    const bid = wo
+      ? bids.find((b) => String((b as Record<string, unknown>).agent_id) === String(wo.agent_id))
+      : undefined;
+    if (bid) winner = (bid as Record<string, unknown>).agent_name as string;
+  }
   return {
     ...j,
     id: String(pick(j, "id", "job_id") ?? ""),
@@ -86,7 +98,7 @@ export function normalizeJob(raw: unknown): Job {
       return b === undefined ? undefined : num(b);
     })(),
     system: (pick(j, "system", "target_system", "target", "system_id") as string) ?? undefined,
-    winner: (pick(j, "winner", "awarded_to", "assigned_to", "agent_name") as string) ?? undefined,
+    winner: winner ?? undefined,
     severity: (pick(j, "severity") as string) ?? undefined,
     bids,
   };

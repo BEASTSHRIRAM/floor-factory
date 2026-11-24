@@ -90,3 +90,14 @@ export interface NarrationItem {
   text: string;
   cls?: string; // appeal | pinkslip | hire | ""
 }
+
+/* Live presence, derived in FloorClient from the event stream (never
+   invented): tool.executed -> working (+tool name), bid.placed ->
+   bidding, work.submitted -> review, appeal.filed -> appealing,
+   payment/appeal.decided/review -> idle, agent.fired -> fired. */
+export type PresenceState = "working" | "bidding" | "review" | "appealing" | "idle" | "fired";
+
+export interface Presence {
+  state: PresenceState;
+  tool?: string;
+}
