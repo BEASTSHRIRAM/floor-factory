@@ -47,22 +47,64 @@ settings["model"], a risk mutation changes settings["risk_appetite"].
 harness_diff() names the differing fields; the engine emits a
 ``harness.mutated`` event with the diff when a replacement is hired.
 
+Operator-created agents (POST /agents) get their def from
+register_custom_agent(): the def is derived from the job family the
+operator picked (charter template on the agent row, allowlist = that
+family's tool server, playbook = the family's recipe), and the registry
+is rebuilt from the agents table whenever the engine or API opens the
+floor DB — see the registry section below.
+
+Hermes upgrades (research_competitors.md §6.3, borrowed from Nous
+Research's Hermes Agent harness craft — per-agent discipline, not
+architecture):
+
+* H1 — build_context() assembles three labelled tiers in a fixed order:
+  STABLE (charter + hard rules, byte-identical for an agent across
+  jobs), CONTEXT (this job: brief, acceptance criteria, playbook, and
+  the toolsets its workplaces offer), VOLATILE (lessons memory +
+  settings). Same inputs render byte-identical context (test_harness).
+* H2 — tools are grouped into named toolsets per department workplace,
+  and a workplace whose service is down at context-build time has its
+  tools dropped from the context and noted in it (Hermes' check_fn
+  pattern), instead of being listed and failing at call time. Health
+  probes are cached (AVAILABILITY_TTL_S) so a shift does not hammer the
+  services; FLOOR_HARNESS_HEALTH_CHECK=off disables probing.
+* H3 — DENY_ALWAYS: a hardline deny layer (see the DENY_ALWAYS section)
+  formalising the floor's human-only powers. The engine checks it
+  BEFORE the allowlist and BEFORE the confirmation gate, in both trust
+  modes — hardline beats Auto, and it binds the manager too.
+* H4 — lessons write hygiene: a per-lesson character cap and dedupe on
+  (agent, normalised text) at insert time in record_lesson().
+* H5 — every family playbook is also exported as a SKILL.md artefact
+  (orchestrator/export_playbooks.py -> docs/playbooks/).
+* H6 — GET /agents/{id}/harness/export serves the whole profile bundle
+  (charter, rules, toolsets, playbook refs, lessons, lineage) as one
+  JSON document — Hermes' one-profile-directory idea as an API artefact.
+* H10 — a golden-file snapshot test pins the rendered context for a
+  fixture agent x family, so prompt drift is a reviewed diff.
+
 Nothing here changes economy rules, the award formula, the confirmation
 gate, or the deterministic checks.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
 try:  # package import (normal use)
-    from orchestrator.tools import TOOL_SPECS
+    from orchestrator import tools as _tools_mod
 except Exception:  # noqa: BLE001 — standalone use inside orchestrator/
     try:
-        from .tools import TOOL_SPECS  # type: ignore
+        from . import tools as _tools_mod  # type: ignore
     except Exception:  # noqa: BLE001
-        from tools import TOOL_SPECS  # type: ignore
+        import tools as _tools_mod  # type: ignore
+
+TOOL_SPECS = _tools_mod.TOOL_SPECS
+_BASE_URLS: dict = getattr(_tools_mod, "_BASE_URLS", {})
 
 ALL_SERVERS: tuple[str, ...] = tuple(TOOL_SPECS.keys())
 
@@ -87,6 +129,164 @@ def base_name(name: str) -> str:
         except ValueError:
             pass
     return name or ""
+
+
+# ---------------------------------------------------------------------------
+# Toolsets (H2) — the allowlist grouped by department workplace, Hermes
+# style: a named set of tools per world the agent can touch. The server
+# key already implied the grouping; this names it. Labels use each
+# workplace's own service title (targets/*/app.py).
+# ---------------------------------------------------------------------------
+
+TOOLSETS: dict[str, str] = {
+    "ticketdesk": "Support · TicketDesk",
+    "stockroom": "Support · StockRoom",
+    "qa": "QA triage · QADesk",
+    "bookkeeping": "Bookkeeping",
+    "sdr": "SDR · CRM-lite",
+    "engineering": "Engineering",
+    "hrdesk": "HR · HRDesk",
+    "seo": "SEO · SEODash",
+}
+
+
+def toolset_label(server: str) -> str:
+    return TOOLSETS.get(server, server)
+
+
+# ---------------------------------------------------------------------------
+# Workplace availability (H2) — Hermes' check_fn pattern: a tool whose
+# world is unavailable silently leaves the assembled context (and the
+# context says so), instead of being listed and failing at call time.
+# The probe is the codebase's existing health pattern (GET {base}/health,
+# short timeout, trust_env=False — cf. orchestrator/connections.py and
+# test_harness.healthy), cached for AVAILABILITY_TTL_S seconds so a
+# 45-context shift probes each workplace a handful of times, not per job.
+# FLOOR_HARNESS_HEALTH_CHECK=off treats every workplace as available
+# without probing (offline test runs).
+# ---------------------------------------------------------------------------
+
+AVAILABILITY_TTL_S = 30.0
+_AVAIL_CACHE: dict[str, Any] = {"ts": 0.0, "map": None}
+_AVAIL_LOCK = threading.Lock()
+
+
+def _probe_server(server: str) -> bool:
+    env_name, default = _BASE_URLS.get(server, (None, None))
+    if not default:
+        return True  # no known base URL — nothing to probe, do not drop
+    base = (os.environ.get(env_name) if env_name else None) or default
+    try:
+        import httpx
+        resp = httpx.get(f"{base.rstrip('/')}/health", timeout=1.0,
+                         trust_env=False)
+        return resp.status_code == 200
+    except Exception:  # noqa: BLE001 — unreachable is a status, not a crash
+        return False
+
+
+def server_availability(servers=ALL_SERVERS, *, ttl: float = AVAILABILITY_TTL_S,
+                        force: bool = False) -> dict[str, bool]:
+    """{server: reachable} for `servers`, cached for `ttl` seconds.
+
+    Only the requested servers are probed (and cached); a caller that
+    needs just its own workplaces does not pay for the whole floor.
+    """
+    if os.environ.get("FLOOR_HARNESS_HEALTH_CHECK", "").lower() == "off":
+        return {s: True for s in servers}
+    now = time.monotonic()
+    with _AVAIL_LOCK:
+        cached = _AVAIL_CACHE["map"]
+        if (not force and cached is not None
+                and now - _AVAIL_CACHE["ts"] < ttl
+                and all(s in cached for s in servers)):
+            return {s: cached[s] for s in servers}
+        probed = {s: _probe_server(s) for s in servers}
+        merged = dict(cached or {})
+        merged.update(probed)
+        _AVAIL_CACHE["map"] = merged
+        _AVAIL_CACHE["ts"] = now
+        return probed
+
+
+def split_tools_by_availability(h: "Harness", availability: dict[str, bool]):
+    """Split a harness's allowlist by workplace availability.
+
+    Returns (kept, dropped): kept maps server -> sorted tool names for
+    reachable workplaces; dropped is a list of (server, toolset_label,
+    tool_count) for workplaces that are down. Servers missing from
+    `availability` count as available (unknown is not a drop).
+    """
+    kept: dict[str, list[str]] = {}
+    dropped: list[tuple[str, str, int]] = []
+    for server in ALL_SERVERS:
+        names = h.tool_names(server)
+        if not names:
+            continue
+        if availability.get(server, True):
+            kept[server] = names
+        else:
+            dropped.append((server, toolset_label(server), len(names)))
+    return kept, dropped
+
+
+# ---------------------------------------------------------------------------
+# DENY_ALWAYS (H3) — the hardline layer. Hermes' rule: the hardline
+# blocklist has no override and beats every approval mode. Ours
+# formalises what the floor already enforces BY ABSENCE (docs/
+# SUBMISSION.md: "Human-only powers are enforced by absent tools, not
+# policy text: Bookkeeping cannot move money, SDR cannot send,
+# Engineering cannot merge, HR cannot hire or reject", SEO has "no
+# publish tool", and "Delete and bulk-close endpoints are never exposed
+# as tools"). No tool below exists in TOOL_SPECS today — that is the
+# point: if a future tool registration, MCP server swap or Synapse
+# regeneration ever introduces one of these names, the engine refuses
+# it before the allowlist, before the confirmation gate, in Manual AND
+# Auto mode, for workers, reviewers and the manager alike.
+#
+# Derivation, per entry (names follow the floor's write_<verb>_<object>
+# convention; classes are exactly the documented human-only powers —
+# nothing else is denied):
+#   bookkeeping/write_move_money   — "the tools move no money"
+#   sdr/write_send_outreach        — SDR is drafts only; "no send tool"
+#   engineering/write_merge_pr     — "humans merge"; approval is not one
+#   hrdesk/write_hire_candidate    — "no hire/reject tool exists"
+#   hrdesk/write_reject_candidate  — same
+#   seo/write_publish_page         — "no publish tool exists"
+# Name fragments denied on EVERY server: "delete" and "publish"
+# (delete/bulk-close exposure is refused platform-wide; publishing is a
+# human act on every surface). Bare "merge"/"send" fragments are NOT
+# denied: write_merge_tickets and write_send_reminder are legitimate,
+# allowlisted worker tools — the deny is surgical, by exact pair.
+# ---------------------------------------------------------------------------
+
+DENY_ALWAYS_PAIRS: frozenset = frozenset({
+    ("bookkeeping", "write_move_money"),
+    ("sdr", "write_send_outreach"),
+    ("engineering", "write_merge_pr"),
+    ("hrdesk", "write_hire_candidate"),
+    ("hrdesk", "write_reject_candidate"),
+    ("seo", "write_publish_page"),
+})
+
+DENY_ALWAYS_FRAGMENTS: tuple[str, ...] = ("delete", "publish")
+
+
+def hardline_denial(server: str, tool_name: str) -> Optional[str]:
+    """Why (server, tool_name) is hardline-denied, or None if it is not.
+
+    Checked by FloorEngine.call BEFORE the harness allowlist and BEFORE
+    the confirmation gate — no mode, persona or approval overrides it.
+    """
+    if (server, tool_name) in DENY_ALWAYS_PAIRS:
+        return (f"{tool_name} is a human-only power on {server} "
+                f"(DENY_ALWAYS: enforced by absence, now enforced by rule)")
+    for fragment in DENY_ALWAYS_FRAGMENTS:
+        if fragment in tool_name:
+            return (f"{tool_name} matches the DENY_ALWAYS fragment "
+                    f"{fragment!r} — no agent tool may {fragment} anything "
+                    f"on the floor")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -503,6 +703,10 @@ def playbook_for(agent: dict, family) -> list[str]:
 
 
 def _tool_set_for_def(d: dict[str, Any]) -> frozenset:
+    if d.get("tools") is not None:
+        # Operator-created specialists carry an explicit allowlist: their
+        # own job family's tool server, nothing else.
+        return d["tools"]
     if d["role"] == "reviewer":
         return _tool_set(ALL_SERVERS, effects=("read",))
     return _tool_set(ALL_SERVERS, exclude=d.get("write_exclusions", frozenset()))
@@ -680,15 +884,49 @@ def _lineage_ids(conn: sqlite3.Connection, agent_id: int) -> list[int]:
     return ids
 
 
+# H4 — write discipline for the lessons store (Hermes' bounded memory:
+# hard caps force curation). A single lesson may carry at most
+# LESSON_MAX_CHARS characters; longer texts are truncated with a marker
+# at insert time, so the store can never grow a monster row. Inserts are
+# deduped on (agent_id, normalised text): the same lesson recorded twice
+# (whitespace/case variants included) returns the existing row's id
+# instead of piling up a duplicate.
+LESSON_MAX_CHARS = 1000
+
+
+def _normalise_lesson(text: str) -> str:
+    """Case/whitespace-insensitive identity of a lesson's text."""
+    return " ".join((text or "").split()).casefold()
+
+
+def _cap_lesson(text: str) -> str:
+    text = text or ""
+    if len(text) <= LESSON_MAX_CHARS:
+        return text
+    return text[: LESSON_MAX_CHARS - 1].rstrip() + "…"
+
+
 def record_lesson(conn: sqlite3.Connection, agent: dict, lesson: str, *,
                   work_order_id: Optional[int] = None,
                   family_key: Optional[str] = None,
                   source: str = "review_reject",
                   cycle_no: Optional[int] = None,
                   caught_by: Optional[str] = None) -> int:
-    """Append one lesson to the agent's store. Returns the lesson id."""
+    """Append one lesson to the agent's store. Returns the lesson id.
+
+    H4 hygiene: the text is character-capped, and if THIS agent already
+    holds a lesson with the same normalised text, the existing row's id
+    is returned and no duplicate is written.
+    """
     init_lessons(conn)
+    lesson = _cap_lesson(lesson)
+    normalised = _normalise_lesson(lesson)
     with conn:
+        for row in conn.execute(
+                "SELECT id, lesson FROM agent_lessons WHERE agent_id = ?",
+                (agent["id"],)).fetchall():
+            if _normalise_lesson(row[1]) == normalised:
+                return int(row[0])
         cur = conn.execute(
             """INSERT INTO agent_lessons (agent_id, agent_name, work_order_id,
                    family_key, source, lesson, created_at, cycle_no, caught_by)
@@ -769,38 +1007,89 @@ def record_review_outcome(conn: sqlite3.Connection, agent: dict, *,
 
 
 # ---------------------------------------------------------------------------
-# Working context — charter + playbook + lessons + tools + settings.
-# Assembled by the engine at award time; this is the prompt an LLM
-# executor would receive, recorded verbatim on the event stream.
+# Working context — assembled by the engine at award time; this is the
+# prompt an LLM executor would receive, recorded verbatim on the event
+# stream. H1 (Hermes' three-tier frozen prompt, §6.3): the context is
+# built in three labelled tiers, always in this order —
+#
+#   TIER 1 · STABLE   charter + hard rules. Byte-identical for the same
+#                     agent on every job (the tier-stability contract is
+#                     pinned by test_harness).
+#   TIER 2 · CONTEXT  this job: brief + acceptance criteria, the family
+#                     playbook, and the toolsets the job's workplaces
+#                     offer — with down workplaces' tools dropped and
+#                     noted (H2).
+#   TIER 3 · VOLATILE lessons memory (lineage, relevance-ranked) and the
+#                     settings line — the parts that change as the
+#                     agent learns.
+#
+# Determinism contract: same (agent, family, lessons, availability) in
+# -> identical bytes out, every time. The golden-file test (H10) pins
+# one fixture rendering so any drift is a reviewed diff.
 # ---------------------------------------------------------------------------
 
 def build_context(conn: Optional[sqlite3.Connection], agent: dict, family,
-                  *, lesson_limit: int = 5) -> str:
+                  *, lesson_limit: int = 5,
+                  availability: Optional[dict[str, bool]] = None) -> str:
     h = harness_for(agent)
     d = _persona_def(h.base_name)
+    fam_key = getattr(family, "key", "")
+    fam_title = getattr(family, "title", "")
+
     lines = [
         f"=== AGENT HARNESS: {h.agent_name} (Gen {h.generation}) ===",
+        "",
+        "## TIER 1 · STABLE — charter + hard rules "
+        "(identical for this agent on every job)",
         "",
         "CHARTER",
         h.charter,
         "",
-        f"PLAYBOOK — {getattr(family, 'title', '')} [{getattr(family, 'key', '')}]",
+        "## TIER 2 · CONTEXT — this job, its playbook and its workplaces",
+        "",
+        f"JOB — {fam_title} [{fam_key}]",
     ]
+    brief = (getattr(family, "brief", "") or "").strip()
+    if brief:
+        lines.append(f"Brief: {brief}")
+    criteria = list(getattr(family, "criteria", []) or [])
+    if criteria:
+        lines.append("Acceptance criteria (the Reviewer checks exactly these):")
+        lines.extend(f"- {c}" for c in criteria)
+    lines.append("")
+    lines.append(f"PLAYBOOK — {fam_title} [{fam_key}]")
     lines.extend(f"{i}. {step}" for i, step in
                  enumerate(build_playbook(d, family), start=1))
     lines.append("")
+
+    # H2 — tools grouped by toolset; a down workplace's tools are
+    # dropped from the context and the drop is stated in it.
+    if availability is None:
+        needed = [s for s in ALL_SERVERS if h.tool_names(s)]
+        availability = server_availability(needed)
+    kept, dropped = split_tools_by_availability(h, availability)
+    kept_count = sum(len(v) for v in kept.values())
+    lines.append(f"TOOLS BY TOOLSET ({kept_count} of {len(h.tools)} "
+                 f"allowlisted tools available):")
+    for server in ALL_SERVERS:
+        if server in kept:
+            lines.append(f"[{toolset_label(server)}] {server}: "
+                         f"{', '.join(kept[server])}")
+    for server, label, count in dropped:
+        lines.append(f"UNAVAILABLE THIS JOB — {label} ({server}) is down: "
+                     f"its {count} tools are dropped from this context.")
+    lines.append("")
+    lines.append("## TIER 3 · VOLATILE — lessons memory + settings "
+                 "(changes as the agent learns)")
+    lines.append("")
     lines.append("LESSONS FROM YOUR PAST JOBS (apply them)")
     lessons = (lessons_for(conn, agent["id"], limit=lesson_limit,
-                           family_key=getattr(family, "key", None))
+                           family_key=fam_key or None)
                if conn is not None else [])
     if lessons:
         lines.extend(f"- [{l['source']}] {l['lesson']}" for l in lessons)
     else:
         lines.append("- (none yet)")
-    lines.append("")
-    tool_bits = [f"{server}: {', '.join(h.tool_names(server))}"
-                 for server in ALL_SERVERS if h.tool_names(server)]
-    lines.append(f"TOOLS YOU MAY USE ({len(h.tools)}): " + " | ".join(tool_bits))
     s = h.settings
     lines.append(
         f"SETTINGS: model={s['model']} model_tier={s['model_tier']} tier={s['tier']} "

@@ -315,6 +315,27 @@ class FloorEngine:
         """
         conn = self._open()
         args = dict(args or {})
+        # H3 hardline (orchestrator/harness.py DENY_ALWAYS, research
+        # §6.3): human-only powers are denied HERE — before the tool's
+        # effect is even looked up (a denied name may not exist in the
+        # specs at all), before the harness allowlist, and before the
+        # confirmation gate. No trust mode overrides it: hardline beats
+        # Auto, and it binds the manager persona too. Hermes' rule,
+        # verbatim in spirit: the hardline blocklist has no override.
+        denial = _harness.hardline_denial(server, tool_name)
+        if denial is not None:
+            if wo_id is not None:
+                ECO.record_tool_call(conn, wo_id, tool_name, args=args,
+                                     effect="write", status="denied",
+                                     result_summary=f"denied (hardline) — {denial}")
+            self._emit("harness.denied_hardline", {
+                "work_order_id": wo_id, "tool_name": tool_name,
+                "server": server, "worker": worker_name, "reason": denial})
+            self._emit("tool.executed", {
+                "work_order_id": wo_id, "tool_name": tool_name, "args": args,
+                "effect": "write", "status": "denied", "worker": worker_name,
+                "reason": "harness_hardline"})
+            raise PermissionError(f"{tool_name} denied (hardline): {denial}")
         effect = self.tools.effect(server, tool_name)
         # Harness allowlist (orchestrator/harness.py): a known persona may
         # only call tools in its own harness. The denial is recorded and

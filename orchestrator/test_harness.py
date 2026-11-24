@@ -29,6 +29,18 @@ Proves:
       upheld, Baron fired and replaced, lessons recorded (reject +
       negative-cycle) and a cycle-2 context carrying a cycle-1 lesson.
   (f) GET /agents/{id}/harness serves the composed harness (TestClient).
+  (g) Hermes upgrades: build_context renders three labelled tiers in
+      order, the STABLE tier is byte-identical for one agent across
+      jobs, and the same inputs render byte-identical context twice
+      (H1); tools are grouped by toolset and a down workplace's tools
+      are dropped from the context and noted (H2); DENY_ALWAYS denies
+      human-only powers in FloorEngine.call before the gate — manager
+      and Auto mode included — while legitimate merge/send tools pass
+      (H3); lessons are character-capped and deduped at insert (H4);
+      the committed SKILL.md playbook artefacts match a fresh render
+      (H5); GET /agents/{id}/harness/export serves the profile bundle
+      (H6); and the golden file pins the fixture context rendering
+      (H10 — regenerate with FLOOR_UPDATE_GOLDEN=1).
 Exits 0 and prints PASS lines when everything holds.
 """
 from __future__ import annotations
@@ -291,6 +303,167 @@ def test_replacement_inherits_lessons():
           "same-family lessons served first")
 
 
+_ALL_UP = {s: True for s in H.ALL_SERVERS}
+_GOLDEN_PATH = (Path(__file__).resolve().parent / "golden"
+                / "maya_triage_context.txt")
+
+
+def test_context_tiers_byte_stable():
+    conn = fresh()
+    ECO.seed_roster(conn)
+    maya = by_name(conn, "Maya")
+    fam = ENG.FAMILIES_BY_KEY["triage"]
+    ctx1 = H.build_context(conn, maya, fam, availability=_ALL_UP)
+    ctx2 = H.build_context(conn, maya, fam, availability=_ALL_UP)
+    # H1 determinism contract: same inputs -> identical bytes.
+    assert ctx1.encode("utf-8") == ctx2.encode("utf-8")
+    # Three labelled tiers, in the fixed order.
+    i1 = ctx1.index("## TIER 1 · STABLE")
+    i2 = ctx1.index("## TIER 2 · CONTEXT")
+    i3 = ctx1.index("## TIER 3 · VOLATILE")
+    assert i1 < i2 < i3
+    # The job's own brief + criteria live in the CONTEXT tier (§6.3).
+    tier2 = ctx1[i2:i3]
+    assert fam.brief in tier2 and fam.criteria[0] in tier2
+    # STABLE tier is byte-identical for the same agent on another job.
+    ctx_b = H.build_context(conn, maya, ENG.FAMILIES_BY_KEY["duplicates"],
+                            availability=_ALL_UP)
+    tier1 = lambda c: c[c.index("## TIER 1"):c.index("## TIER 2")]  # noqa: E731
+    assert tier1(ctx1) == tier1(ctx_b)
+    print("PASS (g1/H1) context renders STABLE -> CONTEXT -> VOLATILE; "
+          "stable tier identical across jobs; rendering is byte-stable")
+
+
+def test_toolsets_drop_down_workplace():
+    conn = fresh()
+    ECO.seed_roster(conn)
+    maya = by_name(conn, "Maya")
+    fam = ENG.FAMILIES_BY_KEY["triage"]
+    down = dict(_ALL_UP, stockroom=False)
+    ctx = H.build_context(conn, maya, fam, availability=down)
+    # Toolsets are named and grouped...
+    assert "[Support · TicketDesk] ticketdesk:" in ctx
+    # ...the down workplace's tools are gone from the context...
+    assert "write_adjust_item" not in ctx
+    assert "read_list_items" not in ctx
+    # ...and the drop is stated in the context itself.
+    assert "UNAVAILABLE THIS JOB" in ctx and "StockRoom" in ctx
+    # With the workplace up, its tools are listed as before.
+    ctx_up = H.build_context(conn, maya, fam, availability=_ALL_UP)
+    assert "write_adjust_item" in ctx_up and "UNAVAILABLE" not in ctx_up
+    print("PASS (g2/H2) tools grouped by toolset; a down workplace's tools "
+          "are dropped from the context and the drop is noted in it")
+
+
+def test_hardline_denies_before_gate():
+    # Pure-function derivation checks: the surgical pairs deny, the
+    # legitimate merge/send worker tools do NOT.
+    assert H.hardline_denial("engineering", "write_merge_pr")
+    assert H.hardline_denial("sdr", "write_send_outreach")
+    assert H.hardline_denial("bookkeeping", "write_move_money")
+    assert H.hardline_denial("hrdesk", "write_hire_candidate")
+    assert H.hardline_denial("seo", "write_publish_page")
+    assert H.hardline_denial("ticketdesk", "write_delete_ticket")
+    assert H.hardline_denial("ticketdesk", "write_merge_tickets") is None
+    assert H.hardline_denial("bookkeeping", "write_send_reminder") is None
+
+    from orchestrator import mode as floor_mode
+    eng = ENG.FloorEngine(db_path=":memory:", tool_client=_FakeTools())
+    try:
+        eng._open()
+        floor_mode.set_mode("auto", by="test_harness")
+        try:
+            # Even the MANAGER, in AUTO mode, cannot merge a PR: the
+            # hardline fires before the gate (which Auto would pass).
+            try:
+                eng.call(None, "write_merge_pr", {"pr_id": 1},
+                         worker_name="manager", server="engineering")
+                raise AssertionError("hardline did not deny write_merge_pr")
+            except PermissionError as exc:
+                assert "hardline" in str(exc), exc
+            # A worker hits it too — before her allowlist is consulted
+            # (the error must be the hardline's, not the allowlist's).
+            try:
+                eng.call(None, "write_send_outreach", {"lead_id": 1},
+                         worker_name="Maya", server="sdr")
+                raise AssertionError("hardline did not deny write_send_outreach")
+            except PermissionError as exc:
+                assert "hardline" in str(exc), exc
+        finally:
+            floor_mode.set_mode("manual", by="test_harness")
+        # The denial is on the event stream, as specified (§6.3).
+        n = eng.conn.execute(
+            "SELECT COUNT(*) AS n FROM events WHERE type = 'harness.denied_hardline'"
+        ).fetchone()["n"]
+        assert n == 2, n
+    finally:
+        eng.close()
+    print("PASS (g3/H3) DENY_ALWAYS denies human-only powers before the "
+          "gate — manager + Auto included — and emits harness.denied_hardline")
+
+
+def test_lessons_hygiene():
+    conn = fresh()
+    ECO.seed_roster(conn)
+    maya = by_name(conn, "Maya")
+    long_text = "detail " * 400  # 2800 chars, over the cap
+    lid = H.record_lesson(conn, maya, long_text, source="test")
+    stored = [l for l in H.lessons_for(conn, maya["id"], limit=50)
+              if l["id"] == lid][0]
+    assert len(stored["lesson"]) <= H.LESSON_MAX_CHARS
+    assert stored["lesson"].endswith("…")
+    lid2 = H.record_lesson(conn, maya, "Always re-read the ticket after writing.",
+                           source="test")
+    # Same lesson, different case/whitespace: deduped to the same row.
+    lid3 = H.record_lesson(conn, maya,
+                           "  always   re-read the ticket after writing. ",
+                           source="test")
+    assert lid3 == lid2
+    assert H.lesson_count(conn, maya["id"]) == 2
+    # A genuinely different lesson still lands as its own row.
+    lid4 = H.record_lesson(conn, maya, "Escalate earlier.", source="test")
+    assert lid4 != lid2 and H.lesson_count(conn, maya["id"]) == 3
+    print("PASS (g4/H4) lessons are character-capped at insert and "
+          "deduped on (agent, normalised text)")
+
+
+def test_playbook_artefacts_match():
+    from orchestrator import export_playbooks as EXP
+    rendered = EXP.render_all()
+    assert set(rendered) == {f.key for f in ENG.JOB_FAMILIES}
+    assert len(rendered) == 23
+    root = Path(__file__).resolve().parent.parent
+    for key, text in rendered.items():
+        for section in ("## When to Use", "## Procedure", "## Pitfalls",
+                        "## Verification"):
+            assert section in text, (key, section)
+        committed = (root / "docs" / "playbooks" / key / "SKILL.md") \
+            .read_text(encoding="utf-8")
+        assert committed == text, f"docs/playbooks/{key}/SKILL.md drifted " \
+            "from the playbook — re-run orchestrator.export_playbooks"
+    print("PASS (g5/H5) all 23 playbooks exported as SKILL.md artefacts; "
+          "committed files match a fresh render")
+
+
+def test_context_golden_file():
+    import os
+    conn = fresh()
+    ECO.seed_roster(conn)
+    maya = by_name(conn, "Maya")
+    fam = ENG.FAMILIES_BY_KEY["triage"]
+    ctx = H.build_context(conn, maya, fam, availability=_ALL_UP)
+    if os.environ.get("FLOOR_UPDATE_GOLDEN") == "1":
+        _GOLDEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _GOLDEN_PATH.write_text(ctx, encoding="utf-8")
+        print(f"NOTE (g6/H10) golden file regenerated at {_GOLDEN_PATH}")
+        return
+    golden = _GOLDEN_PATH.read_text(encoding="utf-8")
+    assert ctx == golden, (
+        "rendered context drifted from the golden file — review the "
+        "change, then regenerate with FLOOR_UPDATE_GOLDEN=1")
+    print("PASS (g6/H10) fixture context matches the golden file byte for byte")
+
+
 def test_economy_suite_still_passes():
     import subprocess
     repo_root = Path(__file__).resolve().parent.parent
@@ -408,6 +581,42 @@ def test_api_harness_endpoint():
           "playbooks, traits and lessons; 404 for unknown agent")
 
 
+def test_api_harness_export_bundle():
+    try:
+        from fastapi.testclient import TestClient
+        from api.main import app
+    except Exception as exc:  # noqa: BLE001
+        print(f"SKIP (g7/H6) API export test — {exc}")
+        return
+    client = TestClient(app)
+    agents = client.get("/state/agents").json()["agents"]
+    maya = next(a for a in agents if a["name"] == "Maya")
+    resp = client.get(f"/agents/{maya['id']}/harness/export")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["format"] == "floor-profile-bundle/1"
+    docs = body["documents"]
+    # The bundle is the whole employee file in one document.
+    assert docs["charter.md"].startswith("You are Maya")
+    assert docs["hard_rules"] and docs["settings"]["model"]
+    toolsets = docs["tools_by_toolset"]
+    assert "Support · TicketDesk" in toolsets
+    assert toolsets["Support · TicketDesk"]["server"] == "ticketdesk"
+    assert any(t["name"] == "write_merge_tickets"
+               for t in toolsets["Support · TicketDesk"]["tools"])
+    assert docs["playbooks"]["triage"]["skill"] == \
+        "docs/playbooks/triage/SKILL.md"
+    assert docs["playbooks"]["triage"]["steps"]
+    assert isinstance(docs["lessons"]["count"], int)
+    assert isinstance(docs["lessons"]["items"], list)
+    lineage = docs["lineage"]
+    assert lineage["ancestors"] == [] and lineage["descendants"] == []
+    assert lineage["harness_diff_vs_parent"] is None
+    assert client.get("/agents/999999/harness/export").status_code == 404
+    print("PASS (g7/H6) GET /agents/{id}/harness/export serves the full "
+          "profile bundle (charter, toolsets, playbook refs, lessons, lineage)")
+
+
 def main() -> int:
     test_traits_derived_identical()
     test_allowlists_and_charters_differ()
@@ -416,9 +625,16 @@ def main() -> int:
     test_mutation_changes_harness()
     test_every_persona_valid_harness()
     test_replacement_inherits_lessons()
+    test_context_tiers_byte_stable()
+    test_toolsets_drop_down_workplace()
+    test_hardline_denies_before_gate()
+    test_lessons_hygiene()
+    test_playbook_artefacts_match()
+    test_context_golden_file()
     test_economy_suite_still_passes()
     test_live_shift_headline_unchanged()
     test_api_harness_endpoint()
+    test_api_harness_export_bundle()
     print("ALL HARNESS TESTS PASSED")
     return 0
 

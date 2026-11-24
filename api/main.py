@@ -434,6 +434,108 @@ def agent_harness(agent_id: int) -> dict:
         conn.close()
 
 
+@app.get("/agents/{agent_id}/harness/export")
+def agent_harness_export(agent_id: int) -> dict:
+    """The full profile bundle for one agent (H6 — Hermes' one profile
+    directory per employee, as a single JSON artefact): identity,
+    charter as a document, hard rules, settings, traits, the tool
+    allowlist grouped by toolset, playbook references (each family's
+    SKILL.md artefact + its steps), the lineage's COMPLETE lessons
+    memory, and the lineage itself (ancestors, descendants, and the
+    harness diff against the parent). Read-only; changes nothing."""
+    conn = _conn()
+    try:
+        agent = ECO.get_agent(conn, agent_id)
+        if agent is None:
+            raise HTTPException(status_code=404, detail=f"no agent {agent_id}")
+        h = floor_harness.harness_for(agent)
+
+        ancestors = []
+        parent = ECO.get_agent(conn, agent["parent_agent_id"]) \
+            if agent.get("parent_agent_id") else None
+        cursor = parent
+        while cursor is not None:
+            ancestors.append({
+                "id": cursor["id"], "name": cursor["name"],
+                "generation": cursor["generation"],
+                "mutation_note": cursor["mutation_note"],
+                "status": cursor["status"]})
+            cursor = ECO.get_agent(conn, cursor["parent_agent_id"]) \
+                if cursor.get("parent_agent_id") else None
+        ancestors.reverse()  # root first, direct parent last
+
+        children: dict[int, list[dict]] = {}
+        for row in ECO.list_agents(conn):
+            if row.get("parent_agent_id"):
+                children.setdefault(row["parent_agent_id"], []).append(row)
+        descendants = []
+        frontier = list(children.get(agent_id, []))
+        while frontier:
+            nxt = []
+            for row in frontier:
+                descendants.append({
+                    "id": row["id"], "name": row["name"],
+                    "generation": row["generation"],
+                    "mutation_note": row["mutation_note"],
+                    "status": row["status"]})
+                nxt.extend(children.get(row["id"], []))
+            frontier = nxt
+
+        diff_vs_parent = None
+        if parent is not None:
+            diff_vs_parent = floor_harness.harness_diff(
+                floor_harness.harness_for(parent), h)
+
+        tools_by_toolset = {}
+        for server in floor_harness.ALL_SERVERS:
+            names = h.tool_names(server)
+            if not names:
+                continue
+            tools_by_toolset[floor_harness.toolset_label(server)] = {
+                "server": server,
+                "tools": [{"name": t,
+                           "effect": floor_harness.TOOL_SPECS[server][t]["effect"]}
+                          for t in names],
+            }
+
+        all_lessons = floor_harness.lessons_for(conn, agent_id, limit=100000)
+        return {
+            "format": "floor-profile-bundle/1",
+            "agent": {"id": agent["id"], "name": agent["name"],
+                      "role": agent["role"], "status": agent["status"],
+                      "generation": agent["generation"],
+                      "parent_agent_id": agent["parent_agent_id"],
+                      "mutation_note": agent["mutation_note"],
+                      "reputation": agent["reputation"],
+                      "department": h.department,
+                      "role_label": h.role_label,
+                      "model_tier": h.model_tier},
+            "documents": {
+                "charter.md": h.charter,
+                "hard_rules": list(h.hard_rules),
+                "settings": h.settings,
+                "traits": {k: (sorted(v) if isinstance(v, (set, frozenset)) else v)
+                           for k, v in h.traits.items()},
+                "tools_by_toolset": tools_by_toolset,
+                "tool_count": len(h.tools),
+                "write_tools": [f"{s}:{t}" for s, t in h.write_tools()],
+                "playbooks": {
+                    fam.key: {
+                        "skill": f"docs/playbooks/{fam.key}/SKILL.md",
+                        "steps": floor_harness.playbook_for(agent, fam),
+                    } for fam in floor_engine.JOB_FAMILIES},
+                "lessons": {"count": len(all_lessons), "items": all_lessons},
+                "lineage": {
+                    "ancestors": ancestors,
+                    "descendants": descendants,
+                    "harness_diff_vs_parent": diff_vs_parent,
+                },
+            },
+        }
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Operator-created agents (POST /agents)
 #
@@ -540,8 +642,6 @@ def agents_catalog() -> dict:
 # Workplace (tool server) labels + the department each workplace belongs
 # to. StockRoom is a workplace of the Support department, not a hiring
 # department of its own — it is labelled as such in the catalogue.
-
-
 _SERVER_LABELS = {
     "ticketdesk": "TicketDesk",
     "stockroom": "StockRoom",
