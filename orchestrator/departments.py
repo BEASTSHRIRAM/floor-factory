@@ -47,6 +47,7 @@ DEPT_LABELS = {
     "sdr": "SDR",
     "engineering": "Engineering",
     "hr": "HR",
+    "seo": "SEO",
 }
 
 
@@ -368,6 +369,90 @@ def _hr_check(key):
 
 
 # ---------------------------------------------------------------------------
+# SEO (server "seo") — checks from targets/seo; the department's surface
+# is analysis + drafts only (reports, briefs, plans are records)
+# ---------------------------------------------------------------------------
+
+_seo_checks = None
+
+
+def _seo():
+    global _seo_checks
+    if _seo_checks is None:
+        _seo_checks = _load("floor_seo_checks", "seo/checks.py")
+    return _seo_checks
+
+
+def _seo_exec_audit(engine, family, wo_id, worker):
+    call = engine.dept_call("seo", wo_id, worker["name"])
+    pages = call("read_list_pages", {"page_type": "landing"})["pages"]
+    findings = []
+    for page in sorted(pages, key=lambda p: p["id"]):
+        audit = call("read_get_page_audit", {"page_id": page["id"]})
+        findings.append({"page_id": page["id"], "issues": audit["issues"]})
+    call("write_save_audit_report", {
+        "scope": _seo().AUDIT_SCOPE, "findings": findings,
+        "author": worker["name"]})
+
+
+def _seo_exec_brief(engine, family, wo_id, worker):
+    call = engine.dept_call("seo", wo_id, worker["name"])
+    checks = _seo()
+    keyword = checks.find_keyword(call, checks.BRIEF_KEYWORD)
+    if keyword is None:
+        raise RuntimeError(f"seo: brief keyword {checks.BRIEF_KEYWORD!r} "
+                           "not tracked")
+    detail = call("read_get_keyword", {"keyword_id": keyword["id"]})
+    angles = detail["competitor_angles"]
+    pages = call("read_list_pages", {})["pages"]
+    target = next(p for p in pages if p["url"] == "/trail-running-shoes")
+    outline = [
+        f"Search intent, audience and SERP summary for "
+        f"'{checks.BRIEF_KEYWORD}'",
+        f"Angle: {angles[0]}",
+        f"Angle: {angles[1]}",
+        f"Angle: {angles[2]}",
+        "Internal linking plan and call to action",
+    ]
+    call("write_save_content_brief", {
+        "keyword_id": keyword["id"],
+        "title": f"Content brief: {checks.BRIEF_KEYWORD}",
+        "intent": keyword["intent"], "outline": outline,
+        "angles_used": angles[:3], "target_page_id": target["id"],
+        "author": worker["name"]})
+    call("write_update_keyword_target", {
+        "keyword_id": keyword["id"], "target_page_id": target["id"],
+        "author": worker["name"]})
+
+
+def _seo_exec_link_plan(engine, family, wo_id, worker):
+    call = engine.dept_call("seo", wo_id, worker["name"])
+    pages = call("read_list_pages", {})["pages"]
+    by_id = {p["id"]: p for p in pages}
+    home = next(p for p in pages if p["url"] == "/")
+    links = [{"from_page_id": home["id"], "to_page_id": orphan_id,
+              "anchor": by_id[orphan_id]["h1"] or by_id[orphan_id]["title"]}
+             for orphan_id in sorted(_seo().compute_orphans(call))]
+    call("write_save_link_plan", {"links": links, "author": worker["name"]})
+
+
+def _seo_check(key):
+    def check(engine, family, wo_id, worker_name):
+        call = engine.dept_call("seo", wo_id, worker_name)
+        # SEO checks take the family's whole criteria list (one finding
+        # per criterion) — see targets/seo/checks.py.
+        return _seo().CHECKS[key](call, family.criteria)
+    return check
+
+
+_SEO_EXEC = {
+    "audit_top_pages": _seo_exec_audit,
+    "content_brief": _seo_exec_brief,
+    "internal_link_plan": _seo_exec_link_plan,
+}
+
+
+# ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
 
@@ -432,5 +517,12 @@ def department_families(Family) -> list:
             f.key, f.title, f.brief, f.budget, f.criteria,
             department="hr", server="hrdesk",
             execute=_hr_exec(f.key), check=_hr_check(f.key)))
+
+    seo_jobs = json.loads((TARGETS / "seo" / "jobs.json").read_text())
+    for t in seo_jobs["templates"]:
+        fams.append(Family(
+            t["key"], t["title"], t["brief"], t["budget_credits"],
+            t["acceptance_criteria"], department="seo", server="seo",
+            execute=_SEO_EXEC[t["key"]], check=_seo_check(t["key"])))
 
     return fams

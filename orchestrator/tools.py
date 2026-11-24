@@ -127,6 +127,19 @@ TOOL_SPECS: dict[str, dict[str, dict[str, str]]] = {
         "write_schedule_interview": {"method": "POST", "path": "/candidates/{candidate_id}/interviews", "effect": "write"},
         "write_screen_candidate": {"method": "POST", "path": "/candidates/{candidate_id}/screen", "effect": "write"},
     },
+    "seo": {
+        "read_get_keyword": {"method": "GET", "path": "/keywords/{keyword_id}", "effect": "read"},
+        "read_get_page_audit": {"method": "GET", "path": "/pages/{page_id}/audit", "effect": "read"},
+        "read_list_audit_reports": {"method": "GET", "path": "/audit-reports", "effect": "read"},
+        "read_list_keywords": {"method": "GET", "path": "/keywords", "effect": "read"},
+        "read_list_link_plans": {"method": "GET", "path": "/link-plans", "effect": "read"},
+        "read_list_links": {"method": "GET", "path": "/links", "effect": "read"},
+        "read_list_pages": {"method": "GET", "path": "/pages", "effect": "read"},
+        "write_save_audit_report": {"method": "POST", "path": "/audit-reports", "effect": "write"},
+        "write_save_content_brief": {"method": "POST", "path": "/briefs", "effect": "write"},
+        "write_save_link_plan": {"method": "POST", "path": "/link-plans", "effect": "write"},
+        "write_update_keyword_target": {"method": "POST", "path": "/keywords/{keyword_id}/target", "effect": "write"},
+    },
 }
 
 _BASE_URLS = {
@@ -137,11 +150,13 @@ _BASE_URLS = {
     "sdr": ("SDR_URL", "http://localhost:8105"),
     "engineering": ("ENGINEERING_URL", "http://localhost:8106"),
     "hrdesk": ("HRDESK_URL", "http://localhost:8107"),
+    "seo": ("SEO_URL", "http://localhost:8109"),
 }
 
 _PATH_PARAMS = ("ticket_id", "item_id", "failure_id", "run_id",
                 "txn_id", "invoice_id", "account_id", "lead_id",
-                "issue_id", "pr_id", "candidate_id", "step_key")
+                "issue_id", "pr_id", "candidate_id", "step_key",
+                "page_id", "keyword_id")
 
 
 class DirectToolClient:

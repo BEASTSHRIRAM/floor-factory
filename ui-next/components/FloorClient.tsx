@@ -23,6 +23,7 @@ import FloorShell, {
 import FloorBoard from "./ao/FloorBoard";
 import FloorInspector from "./ao/FloorInspector";
 import PayrollDialog from "./PayrollDialog";
+import type { MascotState } from "./Mascot";
 import type { Agent, FloorEvent, Job, LedgerRow, NarrationItem, PayrollPayload, Presence } from "../lib/types";
 import {
   API_BASE,
@@ -69,6 +70,7 @@ const DEPT_FILTERS: { key: string; label: string }[] = [
   { key: "sdr", label: "SDR" },
   { key: "engineering", label: "Engineering" },
   { key: "hr", label: "HR" },
+  { key: "seo", label: "SEO" },
 ];
 
 /* Mode switches (offline hero → replay, replay → live) are the two big
@@ -139,6 +141,11 @@ export default function FloorClient() {
   const [toast, setToast] = useState<{ msg: string; error?: boolean } | null>(null);
   const [firedIds, setFiredIds] = useState<Set<string>>(new Set());
   const [hireIds, setHireIds] = useState<Set<string>>(new Set());
+  /* The Foreman avatar's one-shot reactions: payment.made flashes
+     `paid`, agent.fired flashes `pinkslip`, each for ~2s over the
+     derived base state (see mascotState below). */
+  const [mascotFlash, setMascotFlash] = useState<"paid" | "pinkslip" | null>(null);
+  const mascotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [presence, setPresence] = useState<Record<string, Presence>>({});
   const [paidFlash, setPaidFlash] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<{ kind: "job" | "agent"; id: string } | null>(null);
@@ -267,6 +274,16 @@ export default function FloorClient() {
         return next;
       });
     }, 1300);
+  }, []);
+
+  const flashMascot = useCallback((kind: "paid" | "pinkslip") => {
+    setMascotFlash(kind);
+    if (mascotTimer.current) clearTimeout(mascotTimer.current);
+    mascotTimer.current = setTimeout(() => setMascotFlash(null), 2100);
+  }, []);
+
+  useEffect(() => () => {
+    if (mascotTimer.current) clearTimeout(mascotTimer.current);
   }, []);
 
   /* ---------- snapshot ---------- */
@@ -504,6 +521,7 @@ export default function FloorClient() {
           break;
         }
         case "payment.made": {
+          flashMascot("paid");
           const amt = pick(p, "amount_credits", "amount");
           narrate(text || `${nameOf(p)} was paid ${amt !== undefined ? credits(amt) : ""} for "${jobTitleOf(p)}".`);
           const paidId = resolveAgentId(p) ?? workerIdForJob(p) ?? workerIdForWorkOrder(p);
@@ -531,6 +549,7 @@ export default function FloorClient() {
           break;
         }
         case "agent.fired": {
+          flashMascot("pinkslip");
           const fid = pick(p, "agent_id", "id", "agent");
           if (fid !== undefined) {
             setFiredIds((prev) => new Set(prev).add(String(fid)));
@@ -585,7 +604,7 @@ export default function FloorClient() {
           break;
       }
     },
-    [loadSnapshot, nameOf, jobTitleOf, narrate, resolveAgentId, workerIdForJob, workerIdForWorkOrder, jobIdForWorkOrder, setAgentPresence, flashPaid, fetchModeState]
+    [loadSnapshot, nameOf, jobTitleOf, narrate, resolveAgentId, workerIdForJob, workerIdForWorkOrder, jobIdForWorkOrder, setAgentPresence, flashPaid, flashMascot, fetchModeState]
   );
 
   useEffect(() => {
@@ -928,9 +947,19 @@ export default function FloorClient() {
   const selectedJob = selection?.kind === "job" ? jobs.find((j) => j.id === selection.id) ?? null : null;
   const selectedAgent = selection?.kind === "agent" ? agents.find((a) => a.id === selection.id) ?? null : null;
 
+  /* The Foreman's base state, derived from the same live signals the
+     rest of the console runs on: a one-shot event flash wins, then an
+     active auto run, then any agent presence in `working` (or a shift
+     in flight), else idle. Presence is event-derived, so the recorded
+     replay drives the avatar exactly as the live stream does. */
+  const anyWorking = running || Object.values(presence).some((p) => p.state === "working");
+  const mascotState: MascotState =
+    mascotFlash ?? (autoStatus?.status === "running" ? "auto" : anyWorking ? "working" : "idle");
+
   return (
     <>
       <FloorShell
+        mascotState={mascotState}
         management={management}
         workers={workers}
         fired={fired}
@@ -985,6 +1014,12 @@ export default function FloorClient() {
                   </button>
                 );
               })}
+              <a
+                href="/console/connections"
+                className="ml-auto rounded-full border border-border px-2.5 py-1 text-2xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Connections →
+              </a>
             </div>
             <div className="min-h-0 flex-1">
               <FloorBoard

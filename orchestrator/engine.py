@@ -58,6 +58,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from orchestrator import llm as _llm  # noqa: E402
 from orchestrator import tools as _tools  # noqa: E402
 
+# Agent harness (DESIGN_NOTES §4 formalised): explicit charter / tool
+# allowlist / playbook / settings per persona + per-agent lessons memory.
+try:  # package import (normal use)
+    from orchestrator import harness as _harness
+except Exception:  # noqa: BLE001 — standalone use inside orchestrator/
+    import harness as _harness  # type: ignore
+
 # AO orchestration port (docs/AO_ORCHESTRATION_MAP.md §5): the runner
 # supervises job execution; it never decides outcomes.
 try:  # package import (normal use)
@@ -180,15 +187,11 @@ DEPT_LABELS = _departments.DEPT_LABELS
 FAMILIES_BY_KEY = {f.key: f for f in JOB_FAMILIES}
 
 # Persona traits keyed by agent name (roster from economy.core._ROSTER).
-# Generic fallbacks derive from the persona text, so a re-seeded or mutated
+# The harness module is the source of truth now (orchestrator/harness.py);
+# the values are identical to the former literal table. Generic fallbacks
+# in traits_for() derive from the persona text, so a re-seeded or mutated
 # roster still behaves sensibly.
-TRAITS_BY_NAME: dict[str, dict[str, Any]] = {
-    "Maya": {"specialties": {"triage", "stale_close"}, "careful": True},
-    "Ravi": {"specialties": {"duplicates", "stale_close"}, "careful": True},
-    "Pixel": {"specialties": {"triage", "categories"}},
-    "Chotu": {"specialties": {"sla_breach"}, "sloppy": True},
-    "Baron": {"specialties": {"vip_save", "categories"}, "prima_donna": True},
-}
+TRAITS_BY_NAME: dict[str, dict[str, Any]] = _harness.persona_traits()
 
 
 def traits_for(agent: dict) -> dict[str, Any]:
@@ -231,6 +234,7 @@ class FloorEngine:
         if self.conn is None:
             self.conn = EDB.init_db(self.db_path)
             ECO.seed_roster(self.conn)
+            _harness.init_lessons(self.conn)
         return self.conn
 
     def _emit(self, type_: str, payload: dict) -> None:
@@ -284,6 +288,24 @@ class FloorEngine:
         conn = self._open()
         args = dict(args or {})
         effect = self.tools.effect(server, tool_name)
+        # Harness allowlist (orchestrator/harness.py): a known persona may
+        # only call tools in its own harness. The denial is recorded and
+        # raised BEFORE the confirmation gate — a tool outside the
+        # allowlist never becomes a pending approval. Unknown caller names
+        # (no persona) are not enforced here; the gate still applies.
+        allowlist = _harness.allowlist_for_name(worker_name)
+        if allowlist is not None and (server, tool_name) not in allowlist:
+            if wo_id is not None:
+                ECO.record_tool_call(conn, wo_id, tool_name, args=args, effect=effect,
+                                     status="denied",
+                                     result_summary=f"denied — {tool_name} is not in "
+                                                    f"{worker_name}'s harness allowlist")
+            self._emit("tool.executed", {
+                "work_order_id": wo_id, "tool_name": tool_name, "args": args,
+                "effect": effect, "status": "denied", "worker": worker_name,
+                "reason": "harness_allowlist"})
+            raise PermissionError(
+                f"{tool_name} is not in {worker_name}'s harness allowlist")
         confirmation_id: Optional[str] = None
         confirmed_by: Optional[str] = None
 
@@ -578,6 +600,18 @@ class FloorEngine:
         conn.commit()
         self.narrate(f"{winner['name']} won '{title}' at ₡{wo['agreed_price_credits']}.")
 
+        # Harness context (orchestrator/harness.py): the winner's charter +
+        # family playbook + lessons from its past jobs + tool allowlist +
+        # settings, assembled at award time and recorded verbatim on the
+        # event stream — the working context for this job.
+        context = _harness.build_context(conn, winner, family)
+        self._job_ctx.setdefault(wo_id, {})["harness_context"] = context
+        self._emit("harness.context", {
+            "work_order_id": wo_id, "agent": winner["name"],
+            "family": family.key, "department": family.department,
+            "lessons_applied": len(_harness.lessons_for(conn, winner["id"])),
+            "context": context})
+
         # AO lifecycle (AO_ORCHESTRATION_MAP §5): one machine per work
         # order, driven by this method; the AO runner supervises only the
         # execution segment below. Economy rules, the gate and the checks
@@ -655,6 +689,18 @@ class FloorEngine:
             self._machines.pop(wo_id, None)
             return result
 
+        # Harness memory: the rejection becomes a lesson in the winner's
+        # per-agent store; it will be injected into its next job's context.
+        lesson_id = _harness.record_review_outcome(
+            conn, winner, work_order_id=wo_id, family=family,
+            findings=findings, phase="primary", cycle_no=cycle_no,
+            caught_by=f"deterministic checks + reviewer {reviewer_a['name']} (primary)")
+        if lesson_id is not None:
+            self._emit("harness.lesson_recorded", {
+                "work_order_id": wo_id, "agent": winner["name"],
+                "lesson_id": lesson_id, "source": "review_reject",
+                "family": family.key})
+
         # --- appeal: worker remediates, blind reviewer re-checks ---------------
         ECO.file_appeal(conn, wo_id)
         result["appeal"] = "filed"
@@ -690,6 +736,17 @@ class FloorEngine:
                      f"blind reviewer {reviewer_b['name']} re-checked the criteria."
                      + (f" Reviewer {reviewer_a['name']} takes a reputation hit."
                         if new_passed else ""))
+        if not new_passed:
+            # Harness memory: a denied appeal is a second, sharper lesson.
+            lesson_id = _harness.record_review_outcome(
+                conn, winner, work_order_id=wo_id, family=family,
+                findings=new_findings, phase="appeal", cycle_no=cycle_no,
+                caught_by=f"deterministic checks + blind reviewer {reviewer_b['name']} (appeal)")
+            if lesson_id is not None:
+                self._emit("harness.lesson_recorded", {
+                    "work_order_id": wo_id, "agent": winner["name"],
+                    "lesson_id": lesson_id, "source": "appeal_denied",
+                    "family": family.key})
         if new_passed:
             machine.transition(WorkOrderState.SETTLED,
                                reason="appeal upheld; settled")
@@ -737,6 +794,28 @@ class FloorEngine:
             close = ECO.cycle_close(conn, cycle_no)
             cycle_result["fired"] = close.get("fired", [])
             cycle_result["hired"] = close.get("hired", [])
+            # Harness memory: a negative cycle is a lesson too — the CFO's
+            # verdict on the whole cycle, recorded per worker so it is
+            # injected into that lineage's future job contexts.
+            for aid_str, entry in (close.get("agents") or {}).items():
+                if entry.get("net", 0) >= 0:
+                    continue
+                agent_row = ECO.get_agent(conn, int(aid_str))
+                if agent_row is None or agent_row["role"] != "worker":
+                    continue
+                lesson_id = _harness.record_lesson(
+                    conn, agent_row,
+                    f"Cycle {cycle_no} closed at net {entry['net']} credits "
+                    f"({entry.get('completed', 0)} job(s) completed, "
+                    f"₡{entry.get('charged', 0)} running cost charged). Two "
+                    "consecutive negative cycles mean a PinkSlip: win "
+                    "better-paid work or waste fewer credits doing it.",
+                    family_key=None, source="negative_cycle",
+                    cycle_no=cycle_no, caught_by="cycle close (CFO payroll)")
+                self._emit("harness.lesson_recorded", {
+                    "agent": agent_row["name"], "lesson_id": lesson_id,
+                    "source": "negative_cycle", "cycle_no": cycle_no,
+                    "net": entry["net"]})
             for agent_id in cycle_result["fired"]:
                 agent = ECO.get_agent(conn, agent_id)
                 self.narrate(_llm.narrate(
@@ -747,8 +826,27 @@ class FloorEngine:
                     kind="pinkslip")
             for agent_id in cycle_result["hired"]:
                 agent = ECO.get_agent(conn, agent_id)
+                # Lessons belong to the lineage: the replacement inherits
+                # its parent's store (orchestrator/harness._lineage_ids).
+                inherited = _harness.lesson_count(conn, agent_id)
+                inherit_note = (f" Inherits {inherited} lesson(s) from "
+                                f"{ECO.get_agent(conn, agent['parent_agent_id'])['name']}'s record."
+                                if inherited and agent.get("parent_agent_id") else "")
                 self.narrate(f"New hire: {agent['name']} (Gen {agent['generation']}) — "
-                             f"{agent.get('mutation_note')}.")
+                             f"{agent.get('mutation_note')}.{inherit_note}")
+                # Harness mutation, made visible: the replacement's harness
+                # must differ from its parent's — emit the field-level diff.
+                parent_id = agent.get("parent_agent_id")
+                if parent_id:
+                    parent = ECO.get_agent(conn, parent_id)
+                    if parent is not None:
+                        diff = _harness.harness_diff(_harness.harness_for(parent),
+                                                     _harness.harness_for(agent))
+                        self._emit("harness.mutated", {
+                            "agent": agent["name"], "parent": parent["name"],
+                            "mutation_note": agent.get("mutation_note"),
+                            "inherited_lessons": inherited,
+                            "diff": diff})
             summary["cycles"].append(cycle_result)
         summary["mcp_transport"] = getattr(self.tools, "last_transport", None)
         self._emit("shift.completed", {"cycles": [c["cycle_no"] for c in summary["cycles"]]})

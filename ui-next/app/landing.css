@@ -364,6 +364,11 @@ tr.is-active .tl-bar{background:var(--lp-blue)}
   box-shadow:0 24px 60px rgba(0,0,0,.55);background:#211f1c;
 }
 .lp-foreman img{width:100%;height:auto;display:block}
+/* The hero Foreman is the Mascot avatar component: the figure frame
+   owns the border/radius, so the avatar's own chrome flattens out. */
+.lp-foreman .mascot{display:block}
+.lp-foreman .mascot-stack{border:none;border-radius:0}
+.lp-foreman .mascot-stack img{height:100%}
 .lp-foreman figcaption{
   padding:10px 14px;font-family:var(--lp-mono-font);font-size:11px;letter-spacing:.08em;
   text-transform:uppercase;color:var(--lp-sub);border-top:1px solid var(--lp-ring-soft);
