@@ -187,19 +187,39 @@ class Store:
 
     def create_connection(self, *, provider: str, app: str, label: str,
                           auth_ref: Optional[str], test_only: bool,
-                          department: str = "") -> dict:
+                          department: str = "",
+                          status: str = "connected") -> dict:
         # department is the connection's FIXED department mapping for
         # intake; "" means NO fixed mapping — the COO router
         # (orchestrator/router.py) decides per item at intake time.
+        # status starts "connected" for local providers; a Composio
+        # connection starts "pending" until Composio reports the OAuth
+        # account ACTIVE (see refresh_composio_connection).
         cid = uuid.uuid4().hex[:12]
         with self.conn:
             self.conn.execute(
                 """INSERT INTO connections (id, provider, app, label, status,
                        auth_ref, test_only, department, created_at)
-                   VALUES (?, ?, ?, ?, 'connected', ?, ?, ?, ?)""",
-                (cid, provider, app, label, auth_ref, 1 if test_only else 0,
-                 department, _now_iso()))
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (cid, provider, app, label, status, auth_ref,
+                 1 if test_only else 0, department, _now_iso()))
         return self.get_connection(cid)
+
+    def update_connection(self, connection_id: str, **fields) -> Optional[dict]:
+        """Update mutable connection fields (status, department, label).
+        Returns the fresh row, or None when the id is unknown."""
+        allowed = {"status", "department", "label", "auth_ref"}
+        fields = {k: v for k, v in fields.items() if k in allowed}
+        if not fields:
+            return self.get_connection(connection_id)
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        with self.conn:
+            cur = self.conn.execute(
+                f"UPDATE connections SET {sets} WHERE id = ?",
+                (*fields.values(), connection_id))
+        if cur.rowcount == 0:
+            return None
+        return self.get_connection(connection_id)
 
     def get_connection(self, connection_id: str) -> Optional[dict]:
         row = self.conn.execute("SELECT * FROM connections WHERE id = ?",
@@ -410,6 +430,56 @@ class ComposioProvider(Provider):
                 headers=headers)
         resp.raise_for_status()
         return resp.json()
+
+    def create_connected_account(self, app: str,
+                                 user_id: str = "floor-operator"
+                                 ) -> tuple[str, Optional[str]]:
+        """Start a Composio OAuth connection for one app — the v3 flow
+        from OutboundAI's backend (POST /api/v3/connected_accounts with
+        {auth_config:{id}, connection:{user_id}}, falling back to
+        integrationId=<app slug> when the app has no auth config id).
+        Returns (connected_account_id, redirect_url): the browser goes
+        to redirect_url to finish OAuth. Raises ConnectionNotConfigured
+        when COMPOSIO_API_KEY is absent — nothing is faked."""
+        headers = self._headers()  # raises when unconfigured
+        payload: dict[str, Any] = {"connection": {"user_id": user_id}}
+        auth_config_id = get_auth_config_id(app)
+        if auth_config_id:
+            payload["auth_config"] = {"id": auth_config_id}
+        else:
+            payload["integrationId"] = app
+        with httpx.Client(timeout=30.0, trust_env=False) as client:
+            resp = client.post(f"{self.BASE}/connected_accounts",
+                               json=payload, headers=headers)
+        if resp.status_code not in (200, 201, 202):
+            raise RuntimeError(
+                f"Composio connect failed ({resp.status_code}): "
+                f"{resp.text[:300]}")
+        data = resp.json()
+        account_id = data.get("id") or data.get("connection_id")
+        if not account_id:
+            raise RuntimeError("Composio returned no connected account id")
+        return str(account_id), (data.get("redirectUrl")
+                                 or data.get("redirect_url"))
+
+    def connected_account_status(self, auth_ref: Optional[str]
+                                 ) -> Optional[str]:
+        """The connected account's status at Composio ("ACTIVE" once
+        OAuth completes), or None when it cannot be read (no key, no
+        auth_ref, or Composio unreachable — reported, never guessed)."""
+        if not self._key() or not auth_ref:
+            return None
+        try:
+            with httpx.Client(timeout=10.0, trust_env=False) as client:
+                resp = client.get(
+                    f"{self.BASE}/connected_accounts/{auth_ref}",
+                    headers=self._headers())
+            if resp.status_code == 200:
+                status = resp.json().get("status")
+                return str(status) if status else None
+        except Exception:  # noqa: BLE001 — status unknown, not a crash
+            pass
+        return None
 
 
 class LocalTestProvider(Provider):
@@ -645,6 +715,204 @@ def provider_health(name: str) -> dict:
         return out
     out.update({"status": "ok" if ok else "unreachable",
                 "configured": ok})
+    return out
+
+
+# ---------------------------------------------------------------------------
+# App catalog + the Composio connect flow (OutboundAI pattern)
+# ---------------------------------------------------------------------------
+
+# Per-app Composio auth config ids, mirroring OutboundAI's
+# backend/app/core/composio_config.py TOOL_CONFIG_MAP (Sriram's own
+# Composio workspace). Every entry is env-overridable with
+# COMPOSIO_AUTH_CONFIG_<APP> (e.g. COMPOSIO_AUTH_CONFIG_JIRA); apps
+# with no entry fall back to integrationId=<slug>, exactly like
+# OutboundAI's generic /connect endpoint.
+TOOL_CONFIG_MAP: dict[str, Optional[str]] = {
+    "gmail": None,  # OutboundAI reads this one from its env config too
+    "slack": "ac_YPQ1Q5xomR5i",
+    "github": "ac_UE__S2Ls9sMT",
+    "google_sheets": "ac_E9vuh1t4AzEu",
+}
+
+
+def get_auth_config_id(app: str) -> Optional[str]:
+    """Auth config id for one app: env override first
+    (COMPOSIO_AUTH_CONFIG_<APP>, or COMPOSIO_AUTH_CONFIG_ID for gmail),
+    then TOOL_CONFIG_MAP, else None (caller falls back to the slug)."""
+    slug = app.lower()
+    env = os.environ.get(f"COMPOSIO_AUTH_CONFIG_{slug.upper()}")
+    if env:
+        return env
+    if slug == "gmail":
+        env = os.environ.get("COMPOSIO_AUTH_CONFIG_ID")
+        if env:
+            return env
+    return TOOL_CONFIG_MAP.get(slug)
+
+
+# The catalog the console renders (GET /connections/catalog): every
+# app a floor operator can connect, what it does FOR THE FLOOR, and
+# the department it normally feeds. Status is merged in per request
+# from the live registry — never stored here.
+APP_CATALOG: tuple[dict, ...] = (
+    {"slug": "jira", "name": "Jira", "provider": "composio",
+     "category": "Issue tracking", "department": "engineering",
+     "blurb": "Bug reports and issues become Engineering jobs; the "
+              "resolution is written back to the ticket when work is paid."},
+    {"slug": "linear", "name": "Linear", "provider": "composio",
+     "category": "Issue tracking", "department": "engineering",
+     "blurb": "Product issues flow in as Engineering jobs and are "
+              "closed out when the floor ships the fix."},
+    {"slug": "github", "name": "GitHub", "provider": "composio",
+     "category": "Dev tools", "department": "engineering",
+     "blurb": "Issues from your repos become Engineering jobs; merges "
+              "stay behind the human merge gate."},
+    {"slug": "slack", "name": "Slack", "provider": "composio",
+     "category": "Communication", "department": "support",
+     "blurb": "Support questions posted in Slack become Support jobs; "
+              "answers are posted back to the thread."},
+    {"slug": "gmail", "name": "Gmail", "provider": "composio",
+     "category": "Email & docs", "department": "support",
+     "blurb": "Customer emails become Support jobs; replies are "
+              "drafted back through your mailbox."},
+    {"slug": "zendesk", "name": "Zendesk", "provider": "composio",
+     "category": "CRM & support", "department": "support",
+     "blurb": "Help-desk tickets become Support jobs, worked and "
+              "answered inside Zendesk."},
+    {"slug": "hubspot", "name": "HubSpot", "provider": "composio",
+     "category": "CRM & support", "department": "sdr",
+     "blurb": "CRM follow-ups become SDR jobs — drafts only; a human "
+              "always presses send."},
+    {"slug": "notion", "name": "Notion", "provider": "composio",
+     "category": "Email & docs", "department": "seo",
+     "blurb": "Content pages and briefs become SEO jobs; finished "
+              "briefs land back as pages."},
+    {"slug": "google_sheets", "name": "Google Sheets", "provider": "composio",
+     "category": "Data", "department": "bookkeeping",
+     "blurb": "Rows and reconciliations become Bookkeeping jobs with "
+              "deterministically checked totals."},
+    {"slug": "teams", "name": "Microsoft Teams", "provider": "composio",
+     "category": "Communication", "department": "hr",
+     "blurb": "People-ops requests become HR jobs — screening drafts, "
+              "never decisions."},
+    {"slug": "extdesk", "name": "ExtDesk", "provider": "localdesk",
+     "category": "Issue tracking", "department": "engineering",
+     "simulator": True,
+     "blurb": "The floor's built-in simulated issue tracker: the full "
+              "intake loop (report → job → fix → ticket closed), "
+              "runnable right now with no external account."},
+)
+
+CATALOG_CATEGORIES: tuple[str, ...] = (
+    "Issue tracking", "Communication", "Email & docs", "Dev tools",
+    "CRM & support", "Data")
+
+
+def composio_connect(store: Store, *, app: str,
+                     department: Optional[str] = None,
+                     user_id: str = "floor-operator") -> tuple[dict, Optional[str]]:
+    """Start a Composio connection for one catalog app (OutboundAI's
+    POST /integrations/connect, adapted): create the connected account
+    at Composio, store the floor connection as PENDING with the
+    connected_account_id as auth_ref, and return (connection,
+    redirect_url) so the browser can finish OAuth. Without
+    COMPOSIO_API_KEY this raises ConnectionNotConfigured — the exact
+    structured refusal the API turns into a 422."""
+    entry = next((e for e in APP_CATALOG
+                  if e["slug"] == app and e["provider"] == "composio"), None)
+    if entry is None:
+        raise ValueError(f"{app!r} is not a Composio catalog app")
+    if department is not None and department not in DEPARTMENTS:
+        raise ValueError(f"unknown department {department!r} "
+                         f"(one of {', '.join(DEPARTMENTS)})")
+    provider = PROVIDERS["composio"]
+    assert isinstance(provider, ComposioProvider)
+    account_id, redirect_url = provider.create_connected_account(
+        app, user_id=user_id)
+    conn = store.create_connection(
+        provider="composio", app=app,
+        label=f"{entry['name']} via Composio",
+        auth_ref=account_id, test_only=False,
+        department=department or "", status="pending")
+    conn["test_only"] = bool(conn["test_only"])
+    return conn, redirect_url
+
+
+def refresh_composio_connection(store: Store, connection: dict) -> dict:
+    """Health extension for pending Composio connections: ask Composio
+    for the connected account's status; when it reports ACTIVE (or
+    CONNECTED) the floor connection flips to "connected". Any other
+    outcome leaves the row untouched — the remote status is surfaced
+    on the returned dict as ``remote_status`` instead of guessed."""
+    if connection.get("provider") != "composio":
+        return connection
+    if connection.get("status") != "pending":
+        return connection
+    provider = PROVIDERS["composio"]
+    assert isinstance(provider, ComposioProvider)
+    remote = provider.connected_account_status(connection.get("auth_ref"))
+    if remote is None:
+        return connection
+    out = dict(connection)
+    out["remote_status"] = remote
+    if remote.upper() in ("ACTIVE", "CONNECTED"):
+        updated = store.update_connection(connection["id"],
+                                          status="connected")
+        if updated is not None:
+            out = dict(updated)
+            out["remote_status"] = remote
+    out["test_only"] = bool(out.get("test_only"))
+    return out
+
+
+def app_catalog(store: Store) -> list[dict]:
+    """The catalog merged with live registry state (the floor's form
+    of OutboundAI's static-catalog + connected-list merge). One entry
+    per catalog app: status is "connected" / "pending" when a matching
+    connection exists (pending Composio rows are refreshed against
+    Composio first), "available" when its provider is configured, or
+    "not_configured" with the provider's own reason."""
+    connections = store.list_connections()
+    statuses = {p["name"]: p for p in provider_statuses()}
+    out = []
+    for entry in APP_CATALOG:
+        provider_name = entry["provider"]
+        match = None
+        for c in connections:
+            if provider_name == "localdesk":
+                if c["provider"] == "localdesk":
+                    match = c
+                    break
+            elif c["provider"] == "composio" and c["app"] == entry["slug"]:
+                match = c
+                break
+        item = dict(entry)
+        item["suggested_department"] = entry["department"]
+        pstat = statuses.get(provider_name, {})
+        item["provider_configured"] = bool(pstat.get("configured"))
+        item["provider_detail"] = pstat.get("detail", "")
+        if match is not None:
+            match = refresh_composio_connection(store, match)
+            item["status"] = ("connected" if match.get("status") == "connected"
+                              else "pending")
+            item["connection"] = {
+                "id": match["id"], "provider": match["provider"],
+                "app": match["app"], "label": match["label"],
+                "status": match["status"],
+                "department": match.get("department") or None,
+                "test_only": bool(match.get("test_only")),
+                "created_at": match["created_at"],
+                "remote_status": match.get("remote_status"),
+            }
+        elif item["provider_configured"]:
+            item["status"] = "available"
+            item["connection"] = None
+        else:
+            item["status"] = "not_configured"
+            item["connection"] = None
+            item["reason"] = item["provider_detail"]
+        out.append(item)
     return out
 
 

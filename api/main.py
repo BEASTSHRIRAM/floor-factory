@@ -791,6 +791,77 @@ async def connections_create(request: Request) -> dict:
     return {"connection": _public_connection(conn)}
 
 
+@app.get("/connections/catalog")
+def connections_catalog() -> dict:
+    """The app catalog merged with live status (orchestrator/
+    connections.py app_catalog): every app an operator can connect,
+    what it does for the floor, its suggested department, and its real
+    state — connected / pending / available / not_configured with the
+    provider's own reason. Pending Composio connections are refreshed
+    against Composio (ACTIVE there flips them to connected here)."""
+    return {"apps": floor_connections.app_catalog(_connections_store),
+            "categories": list(floor_connections.CATALOG_CATEGORIES),
+            "departments": list(floor_connections.DEPARTMENTS)}
+
+
+@app.post("/connections/composio/connect")
+async def connections_composio_connect(request: Request) -> dict:
+    """Start a Composio OAuth connection for one catalog app
+    (OutboundAI's POST /integrations/connect, adapted): Composio
+    creates a connected account for user "floor-operator", the floor
+    stores it as a PENDING connection, and the caller gets the
+    redirect_url to finish OAuth in the browser. Without
+    COMPOSIO_API_KEY this is the structured 422 not_configured —
+    never a fake success."""
+    body = await _json_body(request)
+    try:
+        conn, redirect_url = floor_connections.composio_connect(
+            _connections_store,
+            app=str(body.get("app", "")),
+            department=(str(body["department"])
+                        if body.get("department") else None))
+    except floor_connections.ConnectionNotConfigured as exc:
+        raise HTTPException(status_code=422, detail={
+            "error": "not_configured", "provider": "composio",
+            "missing": ["COMPOSIO_API_KEY (env on the API server)"],
+            "detail": str(exc)}) from exc
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _emit_api_event("connection.created", {
+        "connection_id": conn["id"], "provider": conn["provider"],
+        "app": conn["app"], "test_only": conn["test_only"],
+        "status": conn["status"]})
+    return {"connection": _public_connection(conn),
+            "connection_id": conn["id"],
+            "connected_account_id": conn.get("auth_ref"),
+            "redirect_url": redirect_url}
+
+
+@app.patch("/connections/{connection_id}")
+async def connections_update(connection_id: str, request: Request) -> dict:
+    """Update a connection's mutable fields: its fixed department
+    mapping ("" clears it — the COO router then routes per item) and
+    its label."""
+    body = await _json_body(request)
+    fields: dict = {}
+    if "department" in body:
+        dept = str(body["department"] or "")
+        if dept and dept not in floor_connections.DEPARTMENTS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"unknown department {dept!r} (one of "
+                       f"{', '.join(floor_connections.DEPARTMENTS)})")
+        fields["department"] = dept
+    if "label" in body:
+        fields["label"] = str(body["label"])
+    updated = _connections_store.update_connection(connection_id, **fields)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="unknown connection")
+    _emit_api_event("connection.updated", {
+        "connection_id": connection_id, "fields": sorted(fields)})
+    return {"connection": _public_connection(updated)}
+
+
 @app.delete("/connections/{connection_id}")
 def connections_delete(connection_id: str) -> dict:
     if not _connections_store.delete_connection(connection_id):
