@@ -35,6 +35,7 @@ from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -55,6 +56,16 @@ TICKETDESK_URL = os.environ.get("TICKETDESK_URL", "http://localhost:8101").rstri
 STOCKROOM_URL = os.environ.get("STOCKROOM_URL", "http://localhost:8102").rstrip("/")
 
 app = FastAPI(title="THE FLOOR", version="1.0.0")
+
+# The Next.js mission control (ui-next) runs on :3000 and talks to this API
+# cross-origin; the vanilla UI is served from this same origin. Local demo
+# stack, so permissive CORS is deliberate here.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 _shift_lock = threading.Lock()
 _shift_state: dict = {"running": False, "last_summary": None, "last_error": None}
