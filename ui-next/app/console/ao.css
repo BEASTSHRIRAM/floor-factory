@@ -1,0 +1,1850 @@
+/* ════════════════════════════════════════════════════════════════════
+   THE FLOOR console theme — adopted from agent-orchestrator.
+   The token block, @theme bridge, utilities and keyframes below are
+   OrchestratorInc/agent-orchestrator's own design system (Apache-2.0;
+   see vendor/ao/LICENSE and THIRD_PARTY.md), extracted from
+   frontend/src/styles/tokens.css + frontend/src/renderer/styles.css.
+   Their LIGHT theme is intentionally not imported: this console is
+   dark only. The only Floor-authored part is the RECOLOUR block at
+   the end, which re-points their palette tokens at THE FLOOR's
+   deep-navy / slate / indigo / cyan ladder. No token is renamed and
+   no component CSS is altered.
+   ════════════════════════════════════════════════════════════════════ */
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@source "../../vendor/ao/product-ui";
+@source "../../components";
+
+@custom-variant dark (&:is(.dark *, :root:not([data-theme="light"]) *));
+@custom-variant focus-visible-in-group (:where(.group):has(:focus-visible) &);
+@custom-variant focus-visible-in-session-row (:where(.group\/session-row):has(:focus-visible) &);
+@custom-variant focus-visible-in-scratchpad (:where(.group\/scratchpad):has(:focus-visible) &);
+@custom-media --layout-narrow (width <= 680px);
+
+/*
+ * Design tokens — Agent Orchestrator frontend
+ * ============================================
+ * Source of truth for the app (Electron renderer) visual system.
+ * Extracted from the existing dark-first Cursor-like UI in
+ * src/renderer/styles.css — not a restyle.
+ *
+ * Theme switching:
+ *   - Default (:root)              → dark
+ *   - :root[data-theme="light"]    → light (renderer Zustand toggle)
+ *   - :root.dark / .dark           → alias for landing/docs (Fumadocs)
+ *
+ * Imported by src/renderer/styles.css. See DESIGN_TOKENS.md.
+ */
+
+:root,
+:root.dark,
+.dark {
+	/* ── Color scheme hint for native form controls / scrollbars ── */
+	color-scheme: dark;
+
+	/* Near-neutral graphite palette: the default app surfaces use only a trace of blue-gray. */
+	--background: oklch(0.210 0.002 250);
+	--foreground: oklch(0.970 0.002 250);
+	--card: oklch(0.250 0.002 250);
+	--card-foreground: oklch(0.970 0.002 250);
+	--popover: oklch(0.300 0.002 250);
+	--popover-foreground: oklch(0.970 0.002 250);
+	--primary: oklch(0.900 0.002 250);
+	--primary-foreground: oklch(0.210 0.002 250);
+	--secondary: oklch(0.295 0.002 250);
+	--secondary-foreground: oklch(0.970 0.002 250);
+	--muted: oklch(0.295 0.002 250);
+	--muted-foreground: oklch(0.720 0.002 250);
+	--accent: oklch(0.295 0.002 250);
+	--accent-foreground: oklch(0.970 0.002 250);
+	--destructive: #fb4934; /* Shared Gruvbox red across palettes. */
+	/* Hairlines separate, they do not decorate: below the shadcn dark default of
+	 * 10% so column rules and card edges recede behind content. */
+	--border: oklch(1 0 0 / 7%);
+	--input: oklch(1 0 0 / 4%);
+	--ring: oklch(0.620 0.002 250);
+	--chart-1: oklch(0.84 0 0);
+	--chart-2: oklch(0.6 0 0);
+	--chart-3: oklch(0.48 0 0);
+	--chart-4: oklch(0.4 0 0);
+	--chart-5: oklch(0.29 0 0);
+	--radius: 0.625rem;
+	--sidebar: oklch(0.180 0.002 250);
+	--sidebar-foreground: oklch(0.970 0.002 250);
+	--sidebar-primary: oklch(0.900 0.002 250);
+	--sidebar-primary-foreground: oklch(0.210 0.002 250);
+	--sidebar-accent: oklch(0.295 0.002 250);
+	--sidebar-accent-foreground: oklch(0.970 0.002 250);
+	--sidebar-border: var(--border);
+	--sidebar-ring: oklch(0.62 0 0);
+
+	/* ═══════════════════════════════════════════════════════════════
+	   COLOR — semantic (swap these per theme; do not invent new roles
+	   for one-off hex — map one-offs to the nearest existing role)
+	   ═══════════════════════════════════════════════════════════════ */
+
+	/* Surfaces */
+	--color-bg-primary: var(--background);
+	--color-bg-secondary: var(--card);
+	--color-bg-tertiary: var(--muted);
+	--color-bg-elevated: var(--popover);
+	--color-bg-sidebar: var(--sidebar);
+	/* Keep the terminal plate opaque so the p-2 gutter cannot composite into
+	   retained frames during terminal swaps. */
+	--color-bg-terminal-opaque: var(--background);
+	--color-bg-terminal: var(--background);
+	/* Opaque backing for terminal swaps/covers; prevents retained frames leaking through. */
+	--color-bg-terminal-opaque: var(--background);
+
+	/* Text */
+	--color-text-primary: var(--foreground);
+	--color-text-muted: var(--muted-foreground);
+	--color-text-passive: var(--chart-3);
+	--color-brand-logo: #338ad3;
+	--color-brand-logo-bright: #66a4de;
+	--color-brand-logo-foreground: #ffffff;
+	/* The accent as small text: a lighter shade of the fill so links and labels
+	 * stay above 4.5:1 on canvas, cards and bubbles. */
+	--color-brand-logo-text: #66a4de;
+	--color-text-markdown-code: var(--color-brand-logo-text);
+	--color-text-markdown-link: var(--color-brand-logo-text); /* underline distinguishes links */
+	--color-text-markdown-link-hover: #88b8e5;
+	/* A workspace file named in chat: the accent as a faint wash, with a pale
+	 * shade of it as text. Both mix from the accent, so a named theme recolours them. */
+	--color-chat-file-bg: color-mix(in srgb, var(--color-brand-logo) 16%, transparent);
+	--color-chat-file-bg-hover: color-mix(in srgb, var(--color-brand-logo) 24%, transparent);
+	--color-chat-file-text: color-mix(in srgb, var(--color-brand-logo-text) 45%, var(--foreground));
+	--color-text-terminal: #d6d6d6;
+	--color-text-terminal-dim: #8e8e8e;
+
+	/* Borders */
+	--color-border: var(--border);
+	--color-border-strong: var(--input);
+
+	/* Reverb workspace bar — derived from the shared shadcn token scale. The bar
+	 * reads as the top of the page it heads, not as sidebar chrome, so it takes
+	 * the page canvas and separates with its hairline alone. */
+	--color-bg-topbar: var(--background);
+	--color-bg-topbar-raised: var(--secondary);
+	--color-border-topbar: var(--border);
+	--color-border-topbar-strong: var(--input);
+	--color-text-topbar: var(--foreground);
+	--color-text-topbar-muted: var(--muted-foreground);
+	--color-text-topbar-passive: var(--chart-3);
+
+	/* Accent and destructive roles */
+	--color-accent: var(--primary);
+	--color-accent-foreground: var(--primary-foreground);
+	--color-accent-weak: color-mix(in oklch, var(--primary) 16%, transparent);
+	--color-accent-dim: var(--chart-4);
+	--color-accent-strong: var(--primary);
+	--color-danger-strong: var(--destructive);
+
+	/* Board lane signals, matched to the landing hero's board preview. */
+	--color-status-working: #60a5fa;
+	--color-status-needs-you: #f06445;
+	--color-status-validating: #e58bb5;
+	--color-status-in-review: #f59e0b;
+	--color-status-ready: #4ade80;
+	--color-status-merged: #c084fc;
+	--color-status-idle: var(--muted-foreground);
+	--color-status-exited: var(--destructive);
+	--color-status-terminated: var(--chart-3);
+	--color-status-terminated-foreground: var(--chart-3);
+	--color-status-unknown: var(--chart-4);
+
+	/* Compatibility roles used by non-session surfaces. */
+	--color-working: var(--color-status-working);
+	--color-warning: var(--color-status-needs-you);
+	--color-success: var(--color-status-ready);
+	--color-success-bright: var(--chart-1);
+	--color-danger: var(--destructive);
+	--color-purple: var(--chart-4);
+
+	--agent-tone-lightness: 0.65;
+	--agent-tone-chroma: 0.15;
+
+	/* Interactive overlays */
+	--color-interactive-hover: color-mix(in oklch, var(--foreground) 4%, transparent);
+	--color-interactive-active: color-mix(in oklch, var(--foreground) 7%, transparent);
+	--color-overlay-subtle: color-mix(in oklch, var(--foreground) 1.8%, transparent);
+	--color-overlay-faint: color-mix(in oklch, var(--foreground) 2%, transparent);
+	--color-scrollbar: color-mix(in oklch, var(--foreground) 12%, transparent);
+	--color-scrollbar-board: color-mix(in oklch, var(--foreground) 26%, transparent);
+	--color-scrollbar-board-hover: color-mix(in oklch, var(--foreground) 45%, transparent);
+	--color-scrim: color-mix(in oklch, var(--background) 85%, transparent);
+	--blur-overlay: 1px;
+
+	/* ═══════════════════════════════════════════════════════════════
+	   TYPOGRAPHY
+	   ═══════════════════════════════════════════════════════════════ */
+
+	--font-family-base: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
+	--font-family-mono:
+		"Geist Mono Variable", "Geist Mono", "JetBrainsMono Nerd Font Mono", "JetBrainsMono Nerd Font",
+		"FiraCode Nerd Font Mono", "FiraCode Nerd Font", "MesloLGS NF", ui-monospace, SFMono-Regular, Menlo, Monaco,
+		Consolas, "Liberation Mono", "Courier New", monospace;
+
+	/* Scale — dense UI chrome uses half-steps between base sizes */
+	--font-size-2xs: 10.5px; /* uppercase meta, board footers */
+	--font-size-xs: 10px; /* micro labels, tight pills */
+	--font-size-nano: 8px; /* smallest chrome text — sidebar search label */
+	--font-size-caption: 11px; /* badges, kanban labels */
+	--font-size-sm-md: 11.5px; /* inspector tabs, status pills */
+	--font-size-sm: 12px; /* secondary chrome / Tailwind text-xs */
+	--font-size-md-sm: 12.5px; /* kv rows, PR summaries */
+	--font-size-base: 13px; /* dense controls (board buttons) */
+	--font-size-brand: 16px; /* titlebar / board project name */
+	--font-size-md: 14px; /* body / Tailwind text-sm */
+	--font-size-subtitle: 15px; /* dialog titles, stat values */
+	--font-size-heading-sm: 17px; /* empty-state headings */
+	--font-size-heading: 21px; /* dashboard subhead */
+	--font-size-heading-lg: 22px; /* preview mock headings */
+
+	--font-weight-medium: 500;
+	--font-weight-semibold: 600;
+
+	--line-height-normal: 1.5;
+	--line-height-snug: 1.42;
+	--line-height-row: 1.25rem; /* 20px — helper rows at text-xs / text-control */
+	--line-height-body-md: 1.55;
+	--line-height-relaxed: 1.6;
+	--line-height-loose: 1.7;
+
+	/* Letter-spacing — uppercase meta, tight headings */
+	--tracking-tight-xl: -0.025em;
+	--tracking-tight-lg: -0.015em;
+	--tracking-tight: -0.01em;
+	--tracking-wide-xs: 0.04em;
+	--tracking-wide-sm: 0.05em;
+	--tracking-wide: 0.06em;
+	--tracking-wide-md: 0.08em;
+	--tracking-wide-lg: 0.09em;
+	--tracking-wide-xl: 0.12em;
+
+	/* Motion */
+	--duration-fast: 120ms;
+	--duration-normal: 150ms;
+
+	/* State opacity */
+	--opacity-control-disabled: 0.35;
+
+	/* ═══════════════════════════════════════════════════════════════
+	   SPACING — 4px base (audit: 4/6/8/10/12/14/16/18 most common)
+	   Prefer even steps; map odd pixels (5/7/9/11/13/15) to nearest.
+	   ═══════════════════════════════════════════════════════════════ */
+
+	--space-0_5: 2px;
+	--space-0_75: 3px;
+	--space-1: 4px;
+	--space-1_25: 5px;
+	--space-1_5: 6px;
+	--space-1_75: 7px;
+	--space-2: 8px;
+	--space-2_25: 9px;
+	--space-2_5: 10px;
+	--space-2_75: 11px;
+	--space-3: 12px;
+	--space-3_25: 13px;
+	--space-3_5: 14px;
+	--space-3_75: 15px;
+	--space-4: 16px;
+	--space-4_5: 18px;
+	--space-5: 20px;
+	--space-5_5: 22px;
+	--space-6: 24px;
+	--space-8: 32px;
+	--space-10: 40px;
+
+	/* ═══════════════════════════════════════════════════════════════
+	   Z-INDEX — stacking layers
+	   chrome < sidebar-preview < titlebar < overlay
+	   Preview peeks paint behind the titlebar cluster so the expand
+	   toggle stays clickable while the overlay is open.
+	   ═══════════════════════════════════════════════════════════════ */
+
+	--z-chrome: 10;
+	--z-sidebar-preview: 15;
+	--z-titlebar: 20;
+	--z-overlay: 50;
+
+	/* ═══════════════════════════════════════════════════════════════
+	   RADIUS
+	   ═══════════════════════════════════════════════════════════════ */
+
+	--radius-xs: calc(var(--radius) * 0.4);
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-panel: calc(var(--radius) * 1.4);
+	--radius-full: 999px; /* pills, avatars, status dots */
+	--radius-swatch: 2px; /* board lane squares: square-reading, not a dot */
+
+	/* ═══════════════════════════════════════════════════════════════
+	   BREAKPOINTS — documented here; @media cannot use var()
+	   ═══════════════════════════════════════════════════════════════ */
+
+	--breakpoint-layout-narrow: 680px; /* reviewer grid — @custom-media in styles.css */
+	--breakpoint-inspector-compact: 300px; /* inspector @container */
+
+	/* ═══════════════════════════════════════════════════════════════
+	   LAYOUT — fixed chrome dimensions (not spacing scale)
+	   ═══════════════════════════════════════════════════════════════ */
+
+	--ring-width-focus: 3px; /* select trigger focus ring */
+
+	--size-hairline: 1px;
+	--size-icon-2xs: 12px;
+	--size-icon-xs: 9px;
+	--size-icon-sm: 13px;
+	--size-icon-md: 14px;
+	--size-icon-base: 16px;
+	--size-icon-lg: 15px;
+	--size-icon-xl: 18px;
+	--size-dot-sm: 7px;
+	--size-swatch: 8px; /* board lane + topbar status squares */
+	--size-control-form: 32px;
+	--size-control-xs: 20px;
+	--size-control-sm: 24px;
+	--size-control-md: 28px;
+	--size-control-lg: 34px;
+	--size-control-xl: 38px;
+	--size-control-board-sm: 30px;
+	--size-control-board: 36px;
+	--size-table-head: var(--space-10);
+	/* Reverb's route-level workspace bar and pane-level secondary rows. Keep
+	   the old names as compatibility aliases while route mounts migrate. */
+	--size-topbar-primary: 36px;
+	--size-topbar-secondary: 36px;
+	--size-topbar-control: 28px;
+	--gap-topbar-control: var(--space-1);
+	--size-toolbar: var(--size-topbar-primary);
+	/* Controls center above the shared header's one-pixel bottom divider. */
+	--size-topbar-content: calc(var(--size-toolbar) - 1px);
+	/* Top offset for the Win/Linux browser and files pop-outs.
+	   Distinct from --size-toolbar (36px). */
+	--size-shell-topbar: 56px;
+	/* Windows custom title bar (.window-titlebar). */
+	--size-window-titlebar: 36px;
+	--size-inspector-tabs: var(--size-topbar-secondary);
+	--size-topbar-context-max: 32rem;
+	--space-topbar-x: 10px;
+	--space-topbar-zone: 10px;
+	--space-topbar-group: 4px;
+	--radius-topbar-control: 7px;
+	--size-row-md: 52px;
+	--size-browser-url: 29px;
+	--size-browser-min: 320px;
+	--size-sidebar-icon: 48px;
+	--size-sidebar-default: 240px;
+	--size-sidebar-mobile: 288px;
+	--size-titlebar-cluster-left: calc(84px / var(--ao-window-zoom, 1));
+	/* Linux has no traffic lights: with the sidebar open the cluster sits at the
+	 * sidebar's own left inset (TitlebarNav `left-titlebar-cluster-left-linux`). */
+	--size-titlebar-cluster-left-linux: 6px;
+	/* Sidebar off-canvas: the framed centre panel is flush-left, so the cluster
+	 * must clear its border (--size-center-panel-inline-inset) instead of
+	 * straddling it. */
+	--size-titlebar-cluster-left-linux-panel: calc(var(--size-center-panel-inline-inset) + 10px);
+	/* TitlebarNav cluster: 3 × --size-control-md buttons + 2 × 4px flex gaps. */
+	--size-titlebar-cluster-width: calc(3 * var(--size-control-md) + 2 * 4px);
+	/* Breathing room between the last arrow and the adjacent in-panel title. */
+	--size-titlebar-content-gap: 12px;
+	/* Clears fixed TitlebarNav (cluster-left + toggle/arrows) when the sidebar is off-canvas. */
+	--size-titlebar-content-offset: calc(
+		var(--size-titlebar-cluster-left) + var(--size-titlebar-cluster-width) + var(--size-titlebar-content-gap)
+	);
+	/* Same clearance measured from the off-canvas Linux cluster inset. */
+	--size-titlebar-content-offset-linux: calc(
+		var(--size-titlebar-cluster-left-linux-panel) + var(--size-titlebar-cluster-width) +
+			var(--size-titlebar-content-gap)
+	);
+
+	/* macOS traffic-light row: the route topbar plus the framed panel's top
+	 * offset (inset + 1px border) above and below, so the native buttons, the
+	 * sidebar brand, and the in-panel title share one centreline. Keep in sync
+	 * with MAC_TRAFFIC_LIGHT_ROW_HEIGHT in shared/window-chrome.ts. */
+	--size-traffic-light-clearance: calc(var(--size-toolbar) + 2 * (var(--size-center-panel-inset-mac) + 1px));
+	/* Fullscreen drops the panel frame, so the row matches the flush topbar. */
+	--size-traffic-light-clearance-fullscreen: var(--size-toolbar);
+	/* Bottom edge of the framed panel's header row: window chrome (drag strips)
+	 * that overlaps the panel must stop here so it never covers panel content. */
+	--size-mac-panel-header-bottom: calc(var(--size-traffic-light-clearance) - var(--size-center-panel-inset-mac) - 1px);
+	/* The same cluster clearance, measured from the framed panel's inner edge. */
+	--size-titlebar-content-offset-mac-panel: calc(
+		var(--size-titlebar-content-offset) - var(--size-center-panel-inset-mac) - 1px
+	);
+	/* Resize handle straddles the sidebar-panel boundary: offset = half the width
+	 * so the hairline lands exactly at the junction and the drag zone covers 6px
+	 * on each side of it. */
+	--size-resize-handle: 12px;
+	--size-resize-handle-offset: 6px;
+	--size-kanban-glow: 130px;
+	--size-kv-label: 74px;
+	--size-notification-width: 460px;
+	--size-notification-max-height: 420px;
+	--size-select-menu-max: 320px; /* agent/select dropdown scroll cap (was max-h-80) */
+	--size-settings-menu-width: 20rem; /* settings option menus — matches agent picker box width */
+	--size-settings-agent-menu-min-width: 20rem; /* agent harness picker — fixed width for status columns */
+	--size-notification-icon: 26px;
+	--size-session-topbar: calc(var(--size-inspector-tabs) + (2 * var(--space-1)));
+	/* DaemonFailureBanner floating toast (was w-[min(22rem,…)] / max-h-40). */
+	--size-daemon-failure-toast: 22rem;
+	--size-daemon-failure-details-max: 10rem;
+	--size-font-size-label: 44px;
+	--size-inspector-status-chip-max: 58%;
+	--size-board-empty: 460px;
+	--size-preview-max: 760px;
+	--size-preview-content: 400px;
+	--size-pr-table-actions: 220px;
+	--size-pr-col-number: 64px;
+	--size-pr-col-state: 96px;
+	--size-content-max: 320px;
+	/* Lets flex children shrink for truncation without hardcoding zero-width utilities in components. */
+	--size-flex-min: 0px;
+	/* Keeps terminal tabs usable after title truncation while leaving room for
+	   several tabs: a short title stays clear of the close laid over its end. */
+	--size-shell-tab-min: 144px;
+	/* Keeps added session tabs aligned with the owning tab in the secondary strip. */
+	--size-session-pane-tab-max: 112px;
+	/* Caps a standalone shell terminal's tab label so several open shells stay
+	   readable side by side instead of one long path crowding out the rest. */
+	--size-shell-tab-max: 180px;
+	/* Agent names and their status glyph need more room in Developer Mode. */
+	--size-agent-shell-tab-max: 192px;
+	/* The session's own tab carries its title and an always-visible ⋮, so it reads the most text. */
+	--size-session-tab-max: 260px;
+	--size-dialog-md: 420px;
+	--size-dialog-lg: 440px;
+	--size-dialog-orchestrator: 460px;
+	--size-dialog-xl: 560px;
+
+	/* Glass overlay: Cmd+K and the New task modal show the app through a
+	 * blurred, see-through modal surface. The see-through share is low enough
+	 * that body text keeps its contrast over any content. */
+	--color-bg-overlay-glass: color-mix(in oklch, var(--popover) 60%, transparent);
+	--blur-overlay-glass: 28px;
+
+	/* Command palette */
+	--color-bg-command-palette: var(--color-bg-overlay-glass);
+	--color-border-command-palette: var(--color-border-overlay);
+	--color-bg-command-item-active: color-mix(in oklch, var(--foreground) 10%, transparent);
+	--color-text-command-item: var(--foreground);
+	--color-text-command-placeholder: var(--muted-foreground);
+	--color-text-command-muted: var(--muted-foreground);
+	--radius-command-palette: var(--radius-panel);
+	--radius-command-item: 6px;
+	--shadow-command-palette: var(--shadow-popover);
+	/* Overlay edge: a faint edge so a transient layer (menu, popover, dialog,
+	 * toast) separates from content without a drawn frame. */
+	--color-border-overlay: color-mix(in oklch, var(--foreground) 2%, transparent);
+	/* Overlay shadow: a barely-there lift. Black, not --background, so it
+	 * reads on a graphite canvas. */
+	--shadow-control-inset: inset 0 1px 0 oklch(100% 0 0 / 12%), inset 0 -1px 0 oklch(0% 0 0 / 8%), 0 1px 3px oklch(0% 0 0 / 1%);
+	--shadow-popover: 0 4px 12px -4px oklch(0 0 0 / 14%);
+	--size-command-palette: 720px;
+	--size-command-palette-top: 14vh;
+	--size-command-palette-list-max: 420px;
+	--size-command-palette-list-vh: 50vh;
+	--size-command-subtitle-max: 45%;
+	--size-command-pad-x: 16px;
+	--size-command-item-inset: 6px;
+	--size-command-item-pad-l: 14px;
+	--font-size-command-input: 16px;
+	--leading-command-item: 22px;
+	--size-branch-chip: 13rem;
+	--size-inspector-min: 280px;
+	--size-textarea-min: 112px;
+	/* Two 24px actions + one 6px gap + 4px right inset + 4px label clearance. */
+	--size-sidebar-project-actions: 58px;
+	/* A pinned row adds a third 24px action and its 2px gap. */
+	--size-sidebar-project-actions-pinned: 84px;
+
+	/* Shared inset-panel geometry (welcome board + settings page) */
+	--size-center-panel-inset: 24px;
+	--size-center-panel-inline-inset: 16px;
+	--size-center-panel-bottom-inset: 14px;
+	/* macOS frames the panel with one uniform inset on all four sides. It stays
+	 * near-flush so in-panel titles align with the fixed TitlebarNav row. */
+	--size-center-panel-inset-mac: 6px;
+	/* Formula: inner = outer_window_radius - inset (nested corner alignment).
+	 * macOS window corner ≈ 18px; inset = 6px → inner = 12px. */
+	--radius-window: 18px;
+	--radius-center-panel: calc(var(--radius-window) - var(--size-center-panel-inset-mac));
+
+	/* Welcome / import radius alias (CreateProjectFlow rounded-welcome-panel) */
+	--color-border-welcome-panel: var(--border);
+	--radius-welcome-panel: var(--radius-center-panel);
+
+	/* Import mode picker */
+	--color-bg-import-modal: var(--card);
+	--color-border-import-modal: var(--border);
+	--color-text-import-title: var(--foreground);
+	--color-text-import-muted: var(--muted-foreground);
+	--color-bg-import-card: var(--popover);
+	--color-bg-import-card-hover: var(--accent);
+	--color-bg-import-illustration: var(--color-bg-import-chip);
+	--color-bg-import-chip: var(--secondary);
+	--shadow-import-modal: var(--shadow-popover);
+	--size-import-modal-max: 896px;
+	--size-import-folder-dialog: 640px;
+	--size-composer-prompt-min: 112px;
+	--size-composer-start-button: 7.25rem;
+	--radius-chat-composer: 20px;
+	/* Task composer — inline toolbar values. Quieter than a filled control at rest
+	 * so the task field stays the only thing with visual weight. */
+	--color-bg-composer-chip: color-mix(in oklab, var(--input) 55%, transparent);
+	--color-bg-composer-chip-hover: var(--secondary);
+	/* Shared equal edge inset for modal header/body/footer sections. */
+	--size-modal-padding: var(--space-6);
+	--size-import-modal-padding: var(--space-8);
+	--size-import-dialog-padding: var(--size-modal-padding);
+	--size-import-mode-card-min: 252px;
+	--size-import-mode-card-min-sm: 292px;
+	--size-import-mode-illustration: 178px;
+
+	/* Settings */
+	--color-bg-settings-row: transparent;
+	--color-bg-settings-menu: var(--popover);
+	--color-bg-settings-menu-selected: color-mix(in oklch, var(--popover) 92%, var(--foreground) 8%);
+	--color-bg-settings-dialog: var(--card);
+	--color-text-settings-title: var(--foreground);
+	--color-text-settings-muted: var(--muted-foreground);
+	--color-text-settings-row: var(--foreground);
+	--color-border-settings: var(--color-border-welcome-panel);
+	--color-border-settings-menu: var(--color-border-overlay);
+	--font-size-settings-title: 28px;
+	--tracking-settings-title: -0.015em;
+	--tracking-settings-section: 0.06em;
+	--tracking-settings-mono: 0.08em;
+	--radius-settings-panel: var(--radius-lg);
+	--radius-settings-row: 16px;
+	--size-settings-row: 52px;
+	--size-settings-section-gap: 40px;
+	--size-settings-section-inner-gap: 12px;
+	--size-settings-row-padding: 16px;
+	--size-settings-row-icon-gap: 12px;
+	--size-settings-menu-min-width: 9rem;
+	--size-settings-inline-input-min: 3.5rem;
+	--size-settings-inline-input-max: 12rem;
+	--size-settings-inline-input-max-percent: 42%;
+	--size-settings-inline-input-height: 28px;
+	--size-settings-row-value-max: 20rem;
+	--size-settings-row-value-max-percent: 55%;
+	--size-settings-dialog: 575px;
+	--size-settings-dialog-wide: 920px;
+	--size-settings-dialog-height: 680px;
+	--size-settings-dialog-max-h: 680px;
+	--color-border-settings-dialog: var(--color-border-overlay);
+	--color-border-settings-dialog-header: var(--border);
+	--color-bg-settings-input: var(--input);
+	--color-border-settings-input: oklch(1 0 0 / 3%);
+	--color-text-settings-input: var(--foreground);
+	--color-text-settings-placeholder: var(--muted-foreground);
+	--color-text-import-sep: var(--color-text-import-muted);
+	--color-settings-accent: var(--primary);
+	--color-settings-switch-on: var(--primary);
+
+	/* Project / workspace agents sheet — aliases shared chrome where themes match */
+	--color-bg-agents-sheet: var(--color-bg-settings-dialog);
+	--color-border-agents-sheet: var(--border);
+	--color-bg-agents-sheet-control: var(--input);
+	--color-text-agents-sheet-title: var(--foreground);
+	--color-text-agents-sheet-description: var(--muted-foreground);
+	--color-text-agents-sheet-label: var(--foreground);
+	--radius-agents-sheet: var(--radius-center-panel);
+	/* Settings layout sizes (Figma) */
+	--size-settings-mobile-dialog: 550px;
+	--size-settings-mobile-dialog-pad-x: 24px;
+	--size-settings-mobile-desc: 420px;
+	--size-settings-mobile-qr: 220px;
+	--size-settings-mobile-qr-code: 204px;
+	--size-settings-mobile-warning: 400px;
+	--size-settings-mobile-label: 55px;
+	--size-settings-mobile-regen-width: 179px;
+	--size-settings-mobile-switch-w: 42px;
+	--size-settings-mobile-switch-h: 26px;
+	--size-settings-mobile-details-pad-x: 19px;
+	--size-settings-mobile-switch-travel: 18px;
+	--leading-settings-mobile-title: 22px;
+	--leading-settings-mobile-hint: 14px;
+	--leading-settings-mobile-warning: 15px;
+	--size-settings-action-height: 38px;
+	--size-composer-toolbar-height: var(--size-control-form);
+	--radius-settings-action: 16px;
+	--radius-settings-dialog-lg: 24px;
+	--shadow-settings-dialog: var(--shadow-popover);
+	--shadow-settings-qr: var(--elevation-md);
+
+	--size-empty-offset-y: 5vh; /* board empty-state vertical nudge */
+
+	/* Browser static preview (light mock page inside dark app) */
+	--color-preview-bg: #f7f8fb;
+	--color-preview-fg: #17202a;
+	--color-preview-muted: #687384;
+	--color-preview-link: #2f5b9d;
+	--color-preview-card-border: #d7dee8;
+	--color-preview-heading: #111827;
+	--color-preview-body: #526070;
+	--color-preview-success-bg: #e7f8ed;
+	--color-preview-tile-border: #e1e7ef;
+	--color-preview-tile-bg: #fbfcfe;
+	--color-preview-terminal-border: #dce4ef;
+	--color-preview-terminal-bg: #0f172a;
+	--color-preview-terminal-fg: #cbd5e1;
+
+	/* Mock project accent swatches (sidebar dots) */
+--color-project-accent-mint: var(--chart-1);
+	--color-project-accent-sky: var(--chart-2);
+	--color-project-accent-violet: #c4b5fd;
+
+	/* Terminal ANSI palette. Keep this independent from product status colors:
+	   agent TUIs own the semantic meaning of these slots. */
+	--color-term-black: #1f2329;
+	--color-term-red: #f05d5e;
+	--color-term-green: #44c97a;
+	--color-term-yellow: #e5c34b;
+	--color-term-blue: #5b9cff;
+	--color-term-magenta: #c678dd;
+	--color-term-cyan: #56b6c2;
+	--color-term-white: #d7dae0;
+	--color-term-selection-dark: rgb(77 141 255 / 0.3);
+	--color-term-selection-light: rgb(37 99 235 / 0.25);
+	--color-term-selection-inactive: rgb(128 128 128 / 0.2);
+	--color-term-selection-inactive-light: rgb(128 128 128 / 0.15);
+	--color-term-bright-black: #7f8792;
+	--color-term-bright-red: #ff7b7c;
+	--color-term-bright-green: #62df91;
+	--color-term-bright-yellow: #f2d66d;
+	--color-term-bright-blue: #79b1ff;
+	--color-term-bright-magenta: #d99aee;
+	--color-term-bright-cyan: #79d4df;
+	--color-term-bright-white: #f4f5f7;
+
+	/* ═══════════════════════════════════════════════════════════════
+	   SHADOWS
+	   ═══════════════════════════════════════════════════════════════ */
+
+	--elevation-sm: 0 1px 0 color-mix(in oklch, var(--background) 35%, transparent);
+	--elevation-md:
+		0 1px 0 color-mix(in oklch, var(--background) 40%, transparent),
+		0 12px 32px color-mix(in oklch, var(--background) 50%, transparent);
+	--elevation-lg: 0 8px 40px color-mix(in oklch, var(--background) 55%, transparent);
+	--elevation-xl:
+		0 1px 0 color-mix(in oklch, var(--background) 40%, transparent),
+		0 20px 50px color-mix(in oklch, var(--background) 55%, transparent);
+
+	/* @theme bridge — avoids Tailwind theme key / :root name collisions */
+	--bridge-border: var(--color-border);
+	--bridge-border-strong: var(--color-border-strong);
+	--bridge-accent: var(--color-accent);
+	--bridge-accent-fg: var(--color-accent-foreground);
+	--bridge-accent-weak: var(--color-accent-weak);
+	--bridge-accent-dim: var(--color-accent-dim);
+	--bridge-accent-strong: var(--color-accent-strong);
+	--bridge-working: var(--color-working);
+	--bridge-success: var(--color-success);
+	--bridge-warning: var(--color-warning);
+	--bridge-danger: var(--color-danger);
+	--bridge-danger-strong: var(--color-danger-strong);
+	--bridge-status-working: var(--color-status-working);
+	--bridge-status-needs-you: var(--color-status-needs-you);
+	--bridge-status-validating: var(--color-status-validating);
+	--bridge-status-in-review: var(--color-status-in-review);
+	--bridge-status-ready: var(--color-status-ready);
+	--bridge-status-merged: var(--color-status-merged);
+	--bridge-status-idle: var(--color-status-idle);
+	--bridge-status-exited: var(--color-status-exited);
+	--bridge-status-terminated: var(--color-status-terminated);
+	--bridge-status-terminated-foreground: var(--color-status-terminated-foreground);
+	--bridge-status-unknown: var(--color-status-unknown);
+	--bridge-interactive-hover: var(--color-interactive-hover);
+	--bridge-interactive-active: var(--color-interactive-active);
+	--bridge-scrim: var(--color-scrim);
+	--bridge-preview-muted: var(--color-preview-muted);
+	--bridge-preview-link: var(--color-preview-link);
+	--bridge-preview-heading: var(--color-preview-heading);
+	--bridge-preview-body: var(--color-preview-body);
+	--bridge-preview-card: var(--color-preview-card-border);
+	--bridge-preview-success: var(--color-preview-success-bg);
+	--bridge-preview-tile: var(--color-preview-tile-bg);
+	--bridge-preview-tile-border: var(--color-preview-tile-border);
+	--bridge-preview-terminal: var(--color-preview-terminal-bg);
+	--bridge-preview-terminal-border: var(--color-preview-terminal-border);
+	--bridge-preview-terminal-fg: var(--color-preview-terminal-fg);
+
+	/* Legacy renderer aliases. The Reverb workspace styles still consume these
+	   names; keep them as semantic pointers rather than reintroducing a second
+	   palette. They resolve through the active theme's supplied shadcn tokens. */
+	--bg: var(--color-bg-primary);
+	--bg-0: var(--color-bg-primary);
+	--bg-1: var(--color-bg-secondary);
+	--bg-2: var(--color-bg-tertiary);
+	--surface: var(--color-bg-secondary);
+	--fg: var(--color-text-primary);
+	--fg-muted: var(--color-text-muted);
+	--fg-passive: var(--color-text-passive);
+	--border-1: var(--color-border-strong);
+	--interactive-hover: var(--color-interactive-hover);
+	--interactive-active: var(--color-interactive-active);
+	--accent-weak: var(--color-accent-weak);
+	--term-bg: var(--color-bg-terminal);
+	--green: var(--color-success);
+	--red: var(--color-danger);
+	--orange: var(--color-working);
+	--amber: var(--color-warning);
+
+	--font-sans: var(--font-family-base);
+	--font-mono: var(--font-family-mono);
+}
+
+@theme inline {
+	--font-sans: var(--font-family-base);
+	--font-mono: var(--font-family-mono);
+
+	/* Typography — align Tailwind text-* with token scale */
+	--text-xs: var(--font-size-sm);
+	--text-sm: var(--font-size-md);
+	--text-base: var(--font-size-md);
+
+	/* Typography — token-named half-steps (text-control = dense 13px chrome) */
+	--text-micro: var(--font-size-xs);
+	--text-2xs: var(--font-size-2xs);
+	--text-caption: var(--font-size-caption);
+	--text-sm-md: var(--font-size-sm-md);
+	--text-md-sm: var(--font-size-md-sm);
+	--text-control: var(--font-size-base);
+	--text-brand: var(--font-size-brand);
+	--text-subtitle: var(--font-size-subtitle);
+	--text-heading-sm: var(--font-size-heading-sm);
+	--text-heading: var(--font-size-heading);
+	--text-heading-lg: var(--font-size-heading-lg);
+
+	/* Radius — align Tailwind rounded-* with token scale */
+	--radius-xs: var(--radius-xs);
+	--radius-sm: var(--radius-sm);
+	--radius-md: var(--radius-md);
+	--radius-lg: var(--radius-lg);
+	--radius-panel: var(--radius-panel);
+	--radius-welcome-panel: var(--radius-welcome-panel);
+	--radius-agents-sheet: var(--radius-agents-sheet);
+	--radius-full: var(--radius-full);
+
+	/* Breakpoints — for Tailwind max-* variants */
+	--breakpoint-layout-narrow: 680px;
+	--breakpoint-inspector-compact: 300px;
+
+	/* Spacing — align Tailwind p-*, gap-*, etc. with token scale */
+	--spacing-0_5: var(--space-0_5);
+	--spacing-0_75: var(--space-0_75);
+	--spacing-1: var(--space-1);
+	--spacing-1_25: var(--space-1_25);
+	--spacing-1_5: var(--space-1_5);
+	--spacing-1_75: var(--space-1_75);
+	--spacing-2: var(--space-2);
+	--spacing-2_25: var(--space-2_25);
+	--spacing-2_5: var(--space-2_5);
+	--spacing-2_75: var(--space-2_75);
+	--spacing-3: var(--space-3);
+	--spacing-3_25: var(--space-3_25);
+	--spacing-3_5: var(--space-3_5);
+	--spacing-3_75: var(--space-3_75);
+	--spacing-4: var(--space-4);
+	--spacing-4_5: var(--space-4_5);
+	--spacing-5: var(--space-5);
+	--spacing-5_5: var(--space-5_5);
+	--spacing-6: var(--space-6);
+	--spacing-8: var(--space-8);
+	--spacing-10: var(--space-10);
+
+	/* Z-index — z-chrome, z-sidebar-preview, z-titlebar, z-overlay */
+	--z-index-chrome: var(--z-chrome);
+	--z-index-sidebar-preview: var(--z-sidebar-preview);
+	--z-index-titlebar: var(--z-titlebar);
+	--z-index-overlay: var(--z-overlay);
+
+	/* Ring width — ring-focus for dense control focus rings */
+	--ring-width-focus: var(--ring-width-focus);
+
+	/* Elevation — align Tailwind shadow-* with token scale */
+	--shadow-sm: var(--elevation-sm);
+	--shadow-md: var(--elevation-md);
+	--shadow-lg: var(--elevation-lg);
+	--shadow-xl: var(--elevation-xl);
+
+	/* Surfaces */
+	--color-background: var(--color-bg-primary);
+	--color-foreground: var(--color-text-primary);
+	/* Ink on foreground fills must stay opaque when window surfaces become clear. */
+	--color-on-foreground: var(--background);
+	--color-surface: var(--color-bg-secondary);
+	--color-card: var(--color-bg-secondary);
+	--color-card-foreground: var(--color-text-primary);
+	--color-raised: var(--color-bg-tertiary);
+	--color-overlay: var(--color-bg-elevated);
+	--color-popover: var(--color-bg-secondary);
+	--color-popover-foreground: var(--color-text-primary);
+	--color-input: var(--bridge-border);
+	--color-sidebar: var(--color-bg-sidebar);
+	--color-sidebar-foreground: var(--sidebar-foreground);
+	--color-sidebar-primary: var(--sidebar-primary);
+	--color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+	--color-sidebar-accent: var(--sidebar-accent);
+	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+	--color-sidebar-border: var(--sidebar-border);
+	--color-sidebar-ring: var(--sidebar-ring);
+	--color-terminal: var(--color-bg-terminal);
+	--color-terminal-opaque: var(--color-bg-terminal-opaque);
+	--color-terminal-foreground: var(--color-text-terminal);
+	--color-terminal-dim: var(--color-text-terminal-dim);
+	--color-scrim: var(--bridge-scrim);
+
+	/* Settings page (Figma) */
+	--color-settings-row: var(--color-bg-settings-row);
+	--color-settings-menu: var(--color-bg-settings-menu);
+	--color-settings-menu-selected: var(--color-bg-settings-menu-selected);
+	--color-settings-title: var(--color-text-settings-title);
+	--color-settings-muted: var(--color-text-settings-muted);
+	--color-settings-label: var(--color-text-settings-row);
+	--color-bg-settings-row-hover: color-mix(in oklch, var(--color-bg-settings-row) 94%, var(--color-text-settings-title));
+	--color-bg-settings-trigger: color-mix(in oklch, var(--color-bg-settings-row) 97%, var(--color-text-settings-title));
+	--color-bg-settings-trigger-hover: color-mix(in oklch, var(--color-bg-settings-row) 91%, var(--color-text-settings-title));
+	--color-text-settings-trigger: color-mix(in oklch, var(--color-text-settings-title) 80%, var(--color-text-settings-muted));
+	--radius-settings-row: var(--radius-settings-row);
+	--radius-settings-panel: var(--radius-settings-panel);
+
+	/* Browser static preview (light mock inside dark app) */
+	--color-preview: var(--color-preview-bg);
+	--color-preview-foreground: var(--color-preview-fg);
+	--color-preview-muted: var(--bridge-preview-muted);
+	--color-preview-link: var(--bridge-preview-link);
+	--color-preview-heading: var(--bridge-preview-heading);
+	--color-preview-body: var(--bridge-preview-body);
+	--color-preview-card: var(--bridge-preview-card);
+	--color-preview-success: var(--bridge-preview-success);
+	--color-preview-tile: var(--bridge-preview-tile);
+	--color-preview-tile-border: var(--bridge-preview-tile-border);
+	--color-preview-terminal: var(--bridge-preview-terminal);
+	--color-preview-terminal-border: var(--bridge-preview-terminal-border);
+
+	/* Icon chrome — size-icon-* utilities */
+	--size-icon-2xs: var(--size-icon-2xs);
+	--size-icon-xs: var(--size-icon-xs);
+	--size-icon-sm: var(--size-icon-sm);
+	--size-icon-md: var(--size-icon-md);
+	--size-icon-base: var(--size-icon-base);
+	--size-icon-lg: var(--size-icon-lg);
+	--size-icon-xl: var(--size-icon-xl);
+
+	/* Typography — tracking & leading */
+	--tracking-tight-xl: var(--tracking-tight-xl);
+	--tracking-tight-lg: var(--tracking-tight-lg);
+	--tracking-tight: var(--tracking-tight);
+	--tracking-wide-xs: var(--tracking-wide-xs);
+	--tracking-wide-sm: var(--tracking-wide-sm);
+	--tracking-wide: var(--tracking-wide);
+	--tracking-wide-md: var(--tracking-wide-md);
+	--tracking-wide-lg: var(--tracking-wide-lg);
+	--tracking-wide-xl: var(--tracking-wide-xl);
+
+	--leading-snug: var(--line-height-snug);
+	--leading-body: var(--line-height-normal);
+	--leading-row: var(--line-height-row);
+	--leading-body-md: var(--line-height-body-md);
+	--leading-relaxed: var(--line-height-relaxed);
+	--leading-loose: var(--line-height-loose);
+
+	--font-weight-medium: var(--font-weight-medium);
+	--font-weight-semibold: var(--font-weight-semibold);
+
+	--duration-fast: var(--duration-fast);
+	--duration-normal: var(--duration-normal);
+
+	/* Motion — press-feedback scale for interactive elements */
+	--scale-press: 0.97;
+
+	/* Layout — toolbar offset for fixed sidebar below topbar */
+	--spacing-toolbar: var(--size-toolbar);
+	--spacing-window-titlebar: var(--size-window-titlebar);
+	--spacing-titlebar-content-offset: var(--size-titlebar-content-offset);
+	--spacing-mac-panel-header-bottom: var(--size-mac-panel-header-bottom);
+	--spacing-titlebar-cluster-left: var(--size-titlebar-cluster-left);
+	/* Linux has no traffic lights — the cluster sits at the sidebar's own inset,
+	 * and clears the framed panel border when the sidebar is off-canvas. */
+	--spacing-titlebar-cluster-left-linux: var(--size-titlebar-cluster-left-linux);
+	--spacing-titlebar-cluster-left-linux-panel: var(--size-titlebar-cluster-left-linux-panel);
+	--spacing-titlebar-content-offset-linux: var(--size-titlebar-content-offset-linux);
+	/* Fullscreen has no traffic lights — align the cluster to sidebar content. */
+	--spacing-titlebar-cluster-left-fullscreen: var(--space-2);
+	--spacing-traffic-light-clearance: var(--size-traffic-light-clearance);
+	--spacing-traffic-light-clearance-fullscreen: var(--size-traffic-light-clearance-fullscreen);
+	--spacing-control-xs: var(--size-control-xs);
+	--spacing-control-sm: var(--size-control-sm);
+	--spacing-control-form: var(--size-control-form);
+	--spacing-control-md: var(--size-control-md);
+	--spacing-control-lg: var(--size-control-lg);
+	--spacing-control-xl: var(--size-control-xl);
+	--spacing-control-board-sm: var(--size-control-board-sm);
+	--spacing-control-board: var(--size-control-board);
+	--spacing-table-head: var(--size-table-head);
+	--spacing-inspector-tabs: var(--size-inspector-tabs);
+	--spacing-session-topbar: var(--size-session-topbar);
+	--spacing-browser-url: var(--size-browser-url);
+	--spacing-browser-min: var(--size-browser-min);
+	--spacing-dot-sm: var(--size-dot-sm);
+	--spacing-content-max: var(--size-content-max);
+	--spacing-flex-min: var(--size-flex-min);
+	--spacing-shell-tab-min: var(--size-shell-tab-min);
+	--spacing-shell-tab-max: var(--size-shell-tab-max);
+	--spacing-agent-shell-tab-max: var(--size-agent-shell-tab-max);
+	--spacing-session-tab-max: var(--size-session-tab-max);
+	--spacing-board-empty: var(--size-board-empty);
+	--spacing-preview-content: var(--size-preview-content);
+	--spacing-preview-max: var(--size-preview-max);
+	--spacing-notification-width: var(--size-notification-width);
+	--spacing-notification-max-height: var(--size-notification-max-height);
+	--spacing-select-menu-max: var(--size-select-menu-max);
+	--spacing-notification-icon: var(--size-notification-icon);
+	--spacing-daemon-failure-details-max: var(--size-daemon-failure-details-max);
+	--spacing-font-size-label: var(--size-font-size-label);
+	--spacing-pr-table-actions: var(--size-pr-table-actions);
+	--spacing-pr-col-number: var(--size-pr-col-number);
+	--spacing-pr-col-state: var(--size-pr-col-state);
+	--spacing-inspector-min: var(--size-inspector-min);
+	--spacing-textarea-min: var(--size-textarea-min);
+	--spacing-sidebar-project-actions: var(--size-sidebar-project-actions);
+	--spacing-sidebar-project-actions-pinned: var(--size-sidebar-project-actions-pinned);
+	--spacing-row-md: var(--size-row-md);
+	--spacing-empty-offset-y: var(--size-empty-offset-y);
+	--spacing-kv-label: var(--size-kv-label);
+	--spacing-branch-chip: var(--size-branch-chip);
+
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-passive: var(--color-text-passive);
+	--color-logo-accent: var(--color-brand-logo);
+	--color-logo-accent-bright: var(--color-brand-logo-bright);
+	--color-logo-accent-foreground: var(--color-brand-logo-foreground);
+	--color-logo-accent-text: var(--color-brand-logo-text);
+	--color-markdown-code: var(--color-text-markdown-code);
+	--color-chat-file: var(--color-chat-file-bg);
+	--color-chat-file-hover: var(--color-chat-file-bg-hover);
+	--color-chat-file-foreground: var(--color-chat-file-text);
+	--color-markdown-link: var(--color-text-markdown-link);
+	--color-markdown-link-hover: var(--color-text-markdown-link-hover);
+	--color-secondary: var(--secondary);
+	--color-secondary-foreground: var(--secondary-foreground);
+
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--primary-foreground);
+	--color-accent-weak: var(--bridge-accent-weak);
+	--color-accent-dim: var(--bridge-accent-dim);
+	--color-accent-strong: var(--bridge-accent-strong);
+	--color-danger-strong: var(--bridge-danger-strong);
+	--color-ring: var(--ring);
+
+	--color-border: var(--border);
+	--color-border-strong: var(--bridge-border-strong);
+
+	--color-working: var(--bridge-working);
+	--color-success: var(--bridge-success);
+	--color-success-bright: var(--color-success-bright);
+	--color-warning: var(--bridge-warning);
+	--color-error: var(--bridge-danger);
+	--color-status-working: var(--bridge-status-working);
+	--color-status-needs-you: var(--bridge-status-needs-you);
+	--color-status-validating: var(--bridge-status-validating);
+	--color-status-in-review: var(--bridge-status-in-review);
+	--color-status-ready: var(--bridge-status-ready);
+	--color-status-merged: var(--bridge-status-merged);
+	--color-status-idle: var(--bridge-status-idle);
+	--color-status-exited: var(--bridge-status-exited);
+	--color-status-terminated: var(--bridge-status-terminated);
+	--color-status-terminated-foreground: var(--bridge-status-terminated-foreground);
+	--color-status-unknown: var(--bridge-status-unknown);
+	--color-destructive: var(--bridge-danger);
+	--color-destructive-foreground: var(--color-accent-foreground);
+
+	--color-interactive-hover: var(--bridge-interactive-hover);
+	--color-interactive-active: var(--bridge-interactive-active);
+
+	--ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+	--ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+	--animate-status-pulse: status-pulse 1.8s ease-in-out infinite;
+	--animate-overlay-in: overlay-in 80ms var(--ease-out);
+	--animate-modal-in: modal-in 120ms var(--ease-out);
+	--animate-popover-in: popover-in 150ms var(--ease-out);
+	/* Exits are shorter than entries: the system is responding, not deciding. */
+	--animate-overlay-out: overlay-out 60ms ease-in;
+	--animate-modal-out: modal-out 70ms cubic-bezier(0.4, 0, 1, 1);
+	--animate-popover-out: popover-out 100ms cubic-bezier(0.4, 0, 1, 1);
+}
+
+/* Pierre powers both the continuous review and focused source views. Keep its
+   Shiki tokenization while making the surface inherit AO's editor typography,
+   workspace canvas, and responsive wrapped-line geometry. */
+.ao-pierre-surface {
+	--diffs-font-family: var(--font-family-mono);
+	--diffs-header-font-family: var(--font-family-base);
+	--diffs-font-size: var(--font-size-sm);
+	--diffs-line-height: var(--line-height-row);
+	--diffs-light-bg: var(--color-bg-primary);
+	--diffs-dark-bg: var(--color-bg-primary);
+	--diffs-light: var(--color-text-terminal);
+	--diffs-dark: var(--color-text-terminal);
+	--diffs-bg-context-override: color-mix(in srgb, var(--color-bg-primary) 92%, var(--foreground) 8%);
+	--diffs-bg-context-gutter-override: color-mix(in srgb, var(--color-bg-primary) 84%, var(--foreground) 16%);
+	--diffs-bg-separator-override: var(--surface);
+	background: var(--color-bg-primary);
+}
+
+/* Full-viewport modal/sheet scrim — dim + blur everything behind pop panels. */
+
+@utility dialog-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: var(--z-overlay);
+	background-color: var(--color-scrim);
+	-webkit-backdrop-filter: blur(var(--blur-overlay));
+	backdrop-filter: blur(var(--blur-overlay));
+}
+@utility overlay-glass {
+	background-color: var(--color-bg-overlay-glass);
+	-webkit-backdrop-filter: blur(var(--blur-overlay-glass)) saturate(1.6);
+	backdrop-filter: blur(var(--blur-overlay-glass)) saturate(1.6);
+	@media (prefers-reduced-transparency: reduce) {
+		background-color: var(--popover);
+		-webkit-backdrop-filter: none;
+		backdrop-filter: none;
+	}
+}
+@utility modal-shake {
+	animation: project-import-shake 280ms ease-in-out;
+}
+@utility toast-enter {
+	animation: toast-enter 180ms var(--ease-out);
+}
+@utility toast-exit {
+	animation: toast-exit 180ms ease-in forwards;
+}
+@utility w-daemon-failure-toast {
+	width: min(var(--size-daemon-failure-toast), calc(100vw - var(--space-6)));
+}
+@utility w-dialog-md {
+	width: min(var(--size-dialog-md), calc(100vw - var(--space-8)));
+}
+@utility w-dialog-lg {
+	width: min(var(--size-dialog-lg), calc(100vw - var(--space-8)));
+}
+@utility w-dialog-xl {
+	width: min(var(--size-dialog-xl), calc(100vw - var(--space-8)));
+}
+@utility w-dialog-orchestrator {
+	width: min(var(--size-dialog-orchestrator), calc(100vw - var(--space-8)));
+}
+@utility w-command-palette {
+	width: min(var(--size-command-palette), calc(100vw - var(--space-8)));
+}
+@utility max-h-command-palette-list {
+	max-height: min(var(--size-command-palette-list-max), var(--size-command-palette-list-vh));
+}
+@utility top-command-palette {
+	top: var(--size-command-palette-top);
+}
+@utility max-w-command-subtitle {
+	max-width: var(--size-command-subtitle-max);
+}
+@utility grid-cols-notification {
+	grid-template-columns: var(--size-notification-icon) minmax(0, 1fr) auto;
+}
+@utility max-w-inspector-status-chip {
+	max-width: var(--size-inspector-status-chip-max);
+}
+@utility w-font-size-label {
+	width: var(--size-font-size-label);
+}
+@utility bg-purple-subtle {
+	background-color: color-mix(in srgb, var(--color-purple) 12%, transparent);
+}
+@utility text-purple-accent {
+	color: var(--color-purple);
+}
+@utility shadow-timeline-dot {
+	box-shadow: 0 0 0 3px var(--color-bg-primary);
+}
+@utility shadow-timeline-dot-now {
+	box-shadow:
+		0 0 0 3px var(--color-bg-primary),
+		0 0 8px var(--color-working);
+}
+@utility session-card-terminated {
+	border-color: color-mix(in srgb, var(--color-status-terminated) 32%, var(--color-border));
+	background-color: color-mix(in srgb, var(--color-status-terminated) 7%, var(--color-bg-primary));
+}
+@utility bg-surface-faint {
+	background-color: color-mix(in srgb, var(--color-bg-primary) 35%, transparent);
+}
+@utility bg-settings-dialog {
+	background-color: var(--color-bg-settings-dialog);
+}
+@utility bg-settings-accent {
+	background-color: var(--color-settings-accent);
+}
+@utility text-settings-accent {
+	color: var(--color-settings-accent);
+}
+@utility bg-settings-switch-on {
+	background-color: var(--color-settings-switch-on);
+}
+@utility text-settings-heading {
+	font-size: var(--font-size-settings-title);
+	line-height: 36px;
+	letter-spacing: var(--tracking-settings-title);
+}
+@utility tracking-settings-section {
+	letter-spacing: var(--tracking-settings-section);
+}
+@utility tracking-settings-mono {
+	letter-spacing: var(--tracking-settings-mono);
+}
+@utility border-settings {
+	border-color: var(--color-border-settings);
+}
+@utility border-settings-menu {
+	border-color: var(--color-border-settings-menu);
+}
+@utility center-panel-shell {
+	display: flex;
+	height: 100%;
+	min-height: 0;
+	width: 100%;
+	background-color: var(--color-bg-sidebar);
+	padding-top: var(--size-center-panel-bottom-inset);
+	padding-right: var(--size-center-panel-inline-inset);
+	padding-bottom: var(--size-center-panel-bottom-inset);
+	padding-left: 0;
+	/* Match the sidebar spring settle time (~280ms). */
+	transition: padding 280ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+@utility center-panel-surface {
+	container-name: center-panel;
+	container-type: inline-size;
+	display: flex;
+	min-height: 0;
+	flex: 1 1 0%;
+	flex-direction: column;
+	overflow: hidden;
+	border-radius: var(--radius-center-panel);
+	border: 1px solid var(--color-border-strong);
+	background-color: var(--color-bg-primary);
+	transition:
+		border-color 280ms cubic-bezier(0.25, 0.46, 0.45, 0.94),
+		border-radius 280ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+@utility settings-row-bar {
+	display: flex;
+	height: var(--size-settings-row);
+	min-height: var(--size-settings-row);
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--size-settings-row-icon-gap);
+	border-radius: var(--radius-settings-row);
+	background-color: var(--color-bg-settings-row);
+	padding-inline: var(--size-settings-row-padding);
+	padding-block: var(--size-settings-row-padding);
+}
+@utility settings-content-row {
+	padding-inline: var(--settings-row-inset);
+	padding-block: var(--space-3);
+}
+@utility settings-menu-item {
+	display: flex;
+	align-items: center;
+	gap: calc(var(--spacing) * 2);
+	/* Same row as the action menus (menu-styles.ts): one menu rhythm app-wide. */
+	border-radius: var(--radius-md);
+	border: 1px solid transparent;
+	padding-inline: var(--space-2);
+	padding-block: var(--space-1_5);
+	font-size: var(--font-size-base);
+	color: var(--muted-foreground);
+}
+@utility settings-option-trigger {
+	display: inline-flex;
+	align-items: center;
+	gap: calc(var(--spacing) * 1.5);
+	border-radius: var(--radius-md);
+	padding-inline: var(--space-2);
+	padding-block: var(--space-1);
+	font-size: var(--font-size-base);
+	transition-property: background-color, border-color, box-shadow;
+	transition-duration: 200ms;
+}
+@utility settings-menu-surface {
+	display: flex;
+	width: max-content;
+	max-width: min(var(--size-settings-menu-width), calc(100vw - 2rem));
+	min-width: var(--size-settings-menu-min-width);
+	max-height: var(--size-select-menu-max);
+	flex-direction: column;
+	overflow-x: hidden;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	border-radius: var(--radius-settings-panel);
+	border: 1px solid var(--color-border-settings-menu);
+	background-color: var(--color-bg-settings-menu);
+	padding: var(--space-1);
+	gap: 1px;
+	box-shadow: var(--shadow-popover);
+}
+@utility settings-agent-menu-surface {
+	width: var(--size-settings-agent-menu-min-width);
+	min-width: var(--size-settings-agent-menu-min-width);
+	padding: var(--space-1);
+	gap: 1px;
+}
+@utility settings-agent-menu-item {
+	padding-inline: var(--space-2);
+	padding-block: var(--space-1_5);
+}
+@utility settings-field-label {
+	font-size: var(--font-size-base);
+	font-weight: var(--font-weight-medium);
+	line-height: 1rem;
+	color: var(--color-text-settings-row);
+}
+@utility settings-field-control {
+	width: 100%;
+	border-radius: var(--radius-settings-action);
+	border: 1px solid var(--color-border-settings-input);
+	background-color: var(--color-bg-settings-input);
+	padding-inline: calc(var(--spacing) * 3.5);
+	font-size: var(--font-size-md);
+	line-height: 1.25rem;
+	color: var(--color-text-settings-input);
+	outline: none;
+	transition-property: border-color, box-shadow;
+	transition-duration: var(--duration-normal);
+
+	&::placeholder {
+		color: var(--color-text-settings-placeholder);
+	}
+
+	&:focus-visible {
+		border-color: var(--color-border-settings-input);
+		box-shadow: none;
+	}
+}
+@utility settings-inline-edit-trigger {
+	display: inline-flex;
+	max-width: min(var(--size-settings-row-value-max), var(--size-settings-row-value-max-percent));
+	min-width: 0;
+	flex: 0 1 auto;
+	align-items: center;
+	justify-content: flex-end;
+	gap: calc(var(--spacing) * 1.5);
+	border: 0;
+	background: transparent;
+	padding: 0;
+	color: var(--color-text-settings-muted);
+	outline: none;
+	cursor: pointer;
+	transition-property: color;
+	transition-duration: var(--duration-fast);
+
+	&:hover,
+	&:focus-visible {
+		color: var(--color-text-settings-row);
+	}
+
+	&:focus-visible {
+		border-radius: var(--radius-md);
+		box-shadow: none;
+	}
+
+	& .settings-row-value {
+		max-width: none;
+	}
+}
+@utility settings-inline-edit-icon {
+	width: var(--size-icon-sm);
+	height: var(--size-icon-sm);
+	flex-shrink: 0;
+	opacity: 0.7;
+}
+@utility settings-inline-edit-input {
+	width: var(--size-settings-inline-input-max);
+	max-width: var(--size-settings-inline-input-max);
+	min-width: 0;
+	flex: 0 1 auto;
+	height: var(--size-settings-inline-input-height);
+	border: 1px solid var(--color-border-settings-input);
+	border-radius: var(--radius-lg);
+	background-color: var(--color-bg-settings-input);
+	padding-inline: calc(var(--spacing) * 2.5);
+	font-size: var(--font-size-base);
+	line-height: 1.25rem;
+	color: var(--color-text-settings-input);
+	text-align: right;
+	outline: none;
+	box-shadow: none;
+	transition-property: border-color, box-shadow, color;
+	transition-duration: var(--duration-normal);
+
+	&::placeholder {
+		color: var(--color-text-settings-placeholder);
+	}
+
+	&:hover {
+		color: var(--color-text-settings-row);
+	}
+
+	&:focus-visible {
+		border-color: var(--color-border-settings-input);
+		box-shadow: none;
+		color: var(--color-text-settings-row);
+		outline: none;
+	}
+}
+@utility settings-inline-input {
+	width: auto;
+	max-width: min(var(--size-settings-inline-input-max), var(--size-settings-inline-input-max-percent));
+	min-width: var(--size-settings-inline-input-min);
+	flex: 0 1 auto;
+	height: var(--size-settings-inline-input-height);
+	border: 1px solid var(--color-border-settings-input);
+	border-radius: var(--radius-lg);
+	background-color: var(--color-bg-settings-input);
+	padding-inline: calc(var(--spacing) * 2.5);
+	font-size: var(--font-size-base);
+	line-height: 1.25rem;
+	color: var(--color-text-settings-input);
+	text-align: right;
+	outline: none;
+	box-shadow: none;
+	transition-property: border-color, box-shadow, color;
+	transition-duration: var(--duration-normal);
+
+	&::placeholder {
+		color: var(--color-text-settings-placeholder);
+	}
+
+	&:hover {
+		color: var(--color-text-settings-row);
+	}
+
+	&:focus-visible {
+		border-color: var(--color-border-settings-input);
+		box-shadow: none;
+		color: var(--color-text-settings-row);
+		outline: none;
+	}
+}
+@utility settings-model-control {
+	width: var(--size-settings-inline-input-max);
+	max-width: var(--size-settings-inline-input-max);
+}
+@utility eyebrow-label {
+	font-family: var(--font-mono);
+	font-size: var(--font-size-xs);
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-wide-lg);
+	color: var(--color-text-passive);
+}
+@utility composer-keycap {
+	display: inline-flex;
+	min-width: 1rem;
+	align-items: center;
+	justify-content: center;
+	font-family: var(--font-mono);
+	font-size: var(--font-size-xs);
+	line-height: 1.1;
+	opacity: 0.75;
+}
+@utility composer-chip {
+	display: inline-flex;
+	width: auto;
+	min-width: 0;
+	max-width: 100%;
+	height: var(--size-settings-action-height);
+	align-items: center;
+	gap: calc(var(--spacing) * 2);
+	padding-inline: var(--space-2);
+	font-size: var(--font-size-base);
+}
+@utility model-menu-scroll {
+	scrollbar-width: none;
+
+	&::-webkit-scrollbar {
+		display: none;
+	}
+}
+@utility menu-search-input {
+	width: 100%;
+	/* Match DropdownMenuItem's text-control line height, py-1.5, and border. */
+	height: calc(var(--line-height-row) + (var(--space-1_5) * 2) + 2px);
+	border: 1px solid var(--color-border-settings-input);
+	border-radius: var(--radius-md);
+	background-color: var(--color-bg-settings-input);
+	padding-inline: var(--space-2_5);
+	font-size: var(--font-size-md);
+	line-height: 1.25rem;
+	color: var(--color-text-settings-input);
+	text-align: left;
+	outline: none;
+	box-shadow: none;
+	transition-property: border-color, box-shadow, color;
+	transition-duration: var(--duration-normal);
+
+	&::placeholder {
+		color: var(--color-text-settings-placeholder);
+	}
+
+	&:focus-visible {
+		border-color: var(--color-border-settings-input);
+		box-shadow: none;
+		color: var(--color-text-settings-row);
+		outline: none;
+	}
+
+	/* The clear affordance is secondary to the query itself, so it recedes
+	   until pointed at. */
+	&::-webkit-search-cancel-button {
+		opacity: 0.4;
+		cursor: pointer;
+		transition: opacity var(--duration-fast) ease-out;
+	}
+
+	&::-webkit-search-cancel-button:hover {
+		opacity: 1;
+	}
+}
+@utility settings-row-value {
+	min-width: 0;
+	max-width: min(var(--size-settings-row-value-max), var(--size-settings-row-value-max-percent));
+	flex: 0 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: right;
+	/* Match settings-option-trigger (Refresh / agent selects) size. */
+	font-size: var(--font-size-base);
+	line-height: 1.25rem;
+	color: var(--color-text-settings-muted);
+}
+@utility settings-segment {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-0_5);
+	border-radius: var(--radius-settings-action);
+	border: 1px solid var(--color-border-settings-input);
+	background-color: var(--color-bg-settings-input);
+	padding: var(--space-0_5);
+}
+@utility settings-segment-item {
+	display: inline-flex;
+	height: var(--size-control-form);
+	cursor: default;
+	align-items: center;
+	gap: calc(var(--spacing) * 1.5);
+	border-radius: var(--radius-lg);
+	padding-inline: var(--space-3);
+	font-size: var(--font-size-base);
+	line-height: 1;
+	color: var(--color-text-settings-muted);
+	outline: none;
+	transition-property: color, background-color;
+	transition-duration: var(--duration-normal);
+
+	&:hover {
+		color: var(--color-text-settings-title);
+	}
+
+	/* Radix radio items take focus with the arrow keys; the checked fill alone
+	   does not show where focus is, so keyboard focus gets the shared ring. */
+	&:focus-visible {
+		box-shadow: 0 0 0 2px color-mix(in oklab, var(--color-ring) 55%, transparent);
+	}
+
+	&[data-state="checked"] {
+		background-color: var(--color-bg-settings-menu-selected);
+		color: var(--color-text-settings-title);
+	}
+}
+@utility settings-mobile-steps {
+	list-style-type: decimal;
+	padding-left: var(--space-4);
+	font-size: var(--font-size-caption);
+	line-height: var(--leading-settings-mobile-hint);
+	color: var(--color-text-settings-muted);
+
+	& > li + li {
+		margin-top: calc(var(--spacing) * 1.5);
+	}
+}
+@utility settings-dialog-title {
+	font-size: var(--font-size-heading-sm);
+	font-weight: var(--font-weight-semibold);
+	line-height: 1.5rem;
+	color: var(--color-text-settings-title);
+}
+@utility import-title {
+	font-size: 20px;
+	font-weight: 700;
+	line-height: 1.75rem;
+	color: var(--color-text-import-title);
+}
+@utility import-description {
+	font-size: var(--font-size-md);
+	font-weight: 400;
+	line-height: 1.25rem;
+	color: var(--color-text-import-muted);
+}
+@utility import-close-button {
+	position: absolute;
+	top: var(--size-import-modal-padding);
+	right: var(--size-import-modal-padding);
+	z-index: calc(var(--z-chrome) + 1);
+	display: grid;
+	width: var(--size-control-md);
+	height: var(--size-control-md);
+	place-items: center;
+	border-radius: var(--radius-md);
+	color: var(--color-text-import-muted);
+	transition-property: color, background-color;
+	transition-duration: var(--duration-normal);
+
+	&:hover {
+		background-color: var(--color-interactive-hover);
+		color: var(--color-text-import-title);
+	}
+
+	&:disabled {
+		pointer-events: none;
+		opacity: 0.5;
+	}
+}
+@utility agents-sheet-label {
+	font-size: var(--font-size-sm);
+	font-weight: var(--font-weight-medium);
+	color: var(--color-text-agents-sheet-label);
+}
+@utility agents-sheet-control {
+	border-radius: var(--radius-lg);
+	border-color: var(--color-border-agents-sheet);
+	background-color: var(--color-bg-agents-sheet-control);
+	box-shadow: none;
+}
+@utility agents-sheet-menu {
+	border-radius: var(--radius-lg);
+	border-color: var(--color-border-agents-sheet);
+	background-color: var(--color-bg-agents-sheet);
+}
+@utility reviews-agent-menu-surface {
+	width: max-content;
+	min-width: 0;
+	max-width: min(13rem, calc(100vw - 2rem));
+	padding: var(--space-1_5);
+	gap: var(--space-1);
+}
+@utility reviews-agent-menu-item {
+	padding-inline: var(--space-2_5);
+	padding-block: var(--space-2);
+}
+
+.scrollbar-none {
+	scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+	width: 0;
+	height: 0;
+}
+.scrollbar-none) {
+	overflow: visible;
+}
+.board-scrollbar::-webkit-scrollbar {
+	width: 4px;
+	height: 4px;
+}
+.board-scrollbar::-webkit-scrollbar-button {
+	display: none;
+	width: 0;
+	height: 0;
+}
+.board-scrollbar::-webkit-scrollbar-track {
+	background: transparent;
+}
+.board-scrollbar::-webkit-scrollbar-thumb {
+	min-height: 8px;
+	border-radius: 999px;
+	background-color: color-mix(in srgb, var(--color-scrollbar) 24%, transparent);
+}
+.board-scrollbar:hover::-webkit-scrollbar-thumb,
+.board-scrollbar:focus-within::-webkit-scrollbar-thumb,
+.board-scrollbar:active::-webkit-scrollbar-thumb {
+	background-color: color-mix(in srgb, var(--color-scrollbar) 42%, transparent);
+}
+.board-scrollbar::-webkit-scrollbar-thumb:hover {
+	background-color: color-mix(in srgb, var(--color-scrollbar) 56%, transparent);
+}
+.board-scrollbar::-webkit-scrollbar-corner {
+	background: transparent;
+}
+.board-scrollbar {
+		scrollbar-width: thin;
+		scrollbar-color: color-mix(in srgb, var(--color-scrollbar) 24%, transparent) transparent;
+	}
+.board-scrollbar:hover,
+	.board-scrollbar:focus-within,
+	.board-scrollbar:active {
+		scrollbar-color: color-mix(in srgb, var(--color-scrollbar) 42%, transparent) transparent;
+	}
+.animate-attention-card-pulse::before {
+	position: absolute;
+	inset: 0;
+	border-radius: inherit;
+	background-color: color-mix(in srgb, var(--color-status-needs-you) 9%, transparent);
+	pointer-events: none;
+	content: "";
+	animation: attention-card-pulse 3.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.animate-attention-card-pulse::before {
+		animation: none;
+		opacity: 0.5;
+	}
+.animate-attention-card-pulse::before {
+	opacity: 0.5;
+}
+
+@keyframes status-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.35;
+	}
+}
+@keyframes attention-card-pulse {
+	0%,
+	100% {
+		opacity: 0.15;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+@keyframes overlay-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
+@keyframes modal-in {
+	from {
+		opacity: 0;
+		scale: 0.95;
+	}
+	to {
+		opacity: 1;
+		scale: 1;
+	}
+}
+@keyframes popover-in {
+	from {
+		opacity: 0;
+		scale: 0.98;
+	}
+	to {
+		opacity: 1;
+		scale: 1;
+	}
+}
+@keyframes overlay-out {
+	from {
+		opacity: 1;
+	}
+	to {
+		opacity: 0;
+	}
+}
+@keyframes modal-out {
+	from {
+		opacity: 1;
+		scale: 1;
+	}
+	to {
+		opacity: 0;
+		scale: 0.95;
+	}
+}
+@keyframes popover-out {
+	from {
+		opacity: 1;
+		scale: 1;
+	}
+	to {
+		opacity: 0;
+		scale: 0.98;
+	}
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   CLAUDE RECOLOUR — the only Floor-authored block in this file.
+   Palette: Anthropic Claude design system (ui-next/DESIGN.md, via
+   getdesign), DARK translation. agent-orchestrator ships a neutral
+   graphite dark palette; THE FLOOR re-points the same tokens at
+   Claude's warm dark surfaces with the clay/coral primary. Where
+   DESIGN.md only documents a light-theme value, the dark value is a
+   color-mix derivation of documented hexes — never a new hue.
+   Dark only: no light values exist anywhere in this stylesheet.
+   ════════════════════════════════════════════════════════════════════ */
+:root {
+	/* Surfaces — DESIGN.md surface-dark family */
+	--background: #181715; /* surface-dark */
+	--foreground: #faf9f5; /* on-dark */
+	--card: #252320; /* surface-dark-elevated */
+	--card-foreground: #faf9f5;
+	--popover: #252320; /* surface-dark-elevated */
+	--popover-foreground: #faf9f5;
+	--primary: #cc785c; /* primary — Claude clay/coral */
+	--primary-foreground: #ffffff; /* on-primary */
+	--secondary: #252320;
+	--secondary-foreground: #faf9f5;
+	--muted: #1f1e1b; /* surface-dark-soft */
+	--muted-foreground: #a09d96; /* on-dark-soft */
+	--accent: color-mix(in srgb, #252320 86%, #faf9f5 14%); /* hover lift off elevated */
+	--accent-foreground: #faf9f5;
+	--destructive: #c64545; /* error */
+	--border: rgb(250 249 245 / 9%); /* hairline, warmed: on-dark at 9% */
+	--input: rgb(250 249 245 / 6%);
+	--ring: #cc785c;
+	--chart-1: #e8e0d2; /* surface-cream-strong */
+	--chart-2: #a09d96;
+	--chart-3: #6c6a64; /* muted */
+	--chart-4: #8e8b82; /* muted-soft */
+	--chart-5: #3d3d3a; /* body */
+	--radius: 0.5rem; /* DESIGN.md rounded.md — buttons/inputs */
+	--sidebar: #1f1e1b; /* surface-dark-soft */
+	--sidebar-foreground: #faf9f5;
+	--sidebar-primary: #cc785c;
+	--sidebar-primary-foreground: #ffffff;
+	--sidebar-accent: #252320;
+	--sidebar-accent-foreground: #faf9f5;
+	--sidebar-ring: #cc785c;
+
+	/* Brand — coral wordmark/accent roles */
+	--color-brand-logo: #cc785c;
+	--color-brand-logo-bright: #e8a55a; /* accent-amber */
+	--color-brand-logo-foreground: #ffffff;
+	--color-brand-logo-text: color-mix(in srgb, #cc785c 70%, #faf9f5 30%);
+	--color-text-markdown-link-hover: #e8a55a;
+
+	/* Status — Claude semantic + accent hues */
+	--color-status-working: #5db8a6; /* accent-teal: Claude's live/active hue */
+	--color-status-validating: #e8a55a; /* accent-amber */
+	--color-status-in-review: #d4a017; /* warning */
+	--color-status-ready: #5db872; /* success */
+	--color-status-merged: #cc785c; /* paid reads as the brand moment */
+	--color-status-needs-you: #c64545; /* error */
+	--color-status-exited: #c64545; /* error */
+
+	/* Type — DESIGN.md: StyreneB/Inter humanist sans, JetBrains Mono.
+	   Inter is the documented substitute; Geist (already loaded by the
+	   app shell) is the humanist face actually served. */
+	--font-family-base: "StyreneB", Inter, var(--font-geist-sans), -apple-system, BlinkMacSystemFont, sans-serif;
+	--font-family-mono: "JetBrains Mono", var(--font-geist-mono), ui-monospace, Menlo, monospace;
+}
+
+/* Claude display voice (Copernicus serif, weight 400, tight tracking)
+   for the Floor-authored surfaces: offline hero + payroll dialog.
+   AO's own components keep their sans, per DESIGN.md's UI hierarchy. */
+.font-display {
+	font-family: "Copernicus", "Tiempos Headline", "Cormorant Garamond", Garamond, Georgia, serif;
+	font-weight: 400;
+	letter-spacing: -0.02em;
+}
+
+/* Console base: the shell owns the viewport on /console. */
+.ao-root {
+	background: var(--color-bg-primary);
+	color: var(--color-text-primary);
+	font-family: var(--font-family-base);
+}
+.ao-root ::selection {
+	background: color-mix(in srgb, var(--color-brand-logo) 45%, transparent);
+}
+
+/* agent-orchestrator button.css (vendored with button.tsx) */
+/*!
+ * Adapted from daisyUI button.css with inset depth and a faint outer shadow.
+ * https://github.com/saadeghi/daisyui/blob/f832adddd5c2b458bda4b0da8816b31a5b17731e/packages/daisyui/src/components/button.css
+ *
+ * MIT License
+ *
+ * Copyright (c) 2020 Pouya Saadeghi
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+/* These rules also override the renderer's unlayered form-control font reset. */
+.button-emphasis {
+	font-weight: var(--font-weight-medium);
+}
+
+@utility button-raised {
+	--button-face: var(--button-color);
+	--button-edge: color-mix(in oklab, var(--button-color), #000 13%);
+	background-color: var(--button-face);
+	border-color: var(--button-edge);
+	box-shadow: var(--shadow-control-inset);
+	touch-action: manipulation;
+
+	@supports (color: contrast-color(red)) {
+		/* 22% lighter bias: shift the luminance cutoff from 0.179129 to 0.359720.
+		   Use the resting fill so hover and press never flip the label color. */
+		color: contrast-color(color-mix(in srgb-linear, var(--button-color) 49.796664%, black));
+	}
+
+	@media (hover: hover) {
+		&:hover:not(:disabled, [aria-disabled="true"]) {
+			--button-face: color-mix(in oklab, var(--button-color), #000 7%);
+		}
+	}
+
+	&:is(:active, [aria-pressed="true"], [data-state="open"], [data-active="true"]):not(:disabled, [aria-disabled="true"]) {
+		--button-face: color-mix(in oklab, var(--button-color), #000 14%);
+	}
+
+	&:focus-visible {
+		outline: 2px solid var(--ring);
+		outline-offset: 2px;
+	}
+
+	&:is(:disabled, [aria-disabled="true"]) {
+		box-shadow: none;
+	}
+}
