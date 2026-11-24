@@ -34,7 +34,7 @@ Usage:
     client.is_write("ticketdesk", "write_assign_ticket")  # True
 
 server_kind is one of the keys of SERVERS (ticketdesk, stockroom,
-qa, bookkeeping, sdr, engineering, hrdesk). Base URLs come from the
+qa, bookkeeping, sdr, engineering, hrdesk, seo). Base URLs come from the
 TICKETDESK_URL / STOCKROOM_URL env vars (defaults :8101 / :8102), the
 same vars the MCP server files read.
 """
@@ -86,6 +86,11 @@ SERVERS: dict[str, dict[str, Any]] = {
         "server_file": REPO_ROOT / "targets" / "hrdesk" / "mcp_server.py",
         "env_var": "HRDESK_URL",
         "default_url": "http://localhost:8107",
+    },
+    "seo": {
+        "server_file": REPO_ROOT / "targets" / "seo" / "mcp_server.py",
+        "env_var": "SEO_URL",
+        "default_url": "http://localhost:8109",
     },
 }
 
@@ -172,6 +177,19 @@ TOOL_SPECS: dict[str, dict[str, dict[str, str]]] = {
         "write_complete_onboarding_step": {"method": "POST", "path": "/onboarding/{candidate_id}/steps/{step_key}/complete", "effect": "write"},
         "write_schedule_interview": {"method": "POST", "path": "/candidates/{candidate_id}/interviews", "effect": "write"},
         "write_screen_candidate": {"method": "POST", "path": "/candidates/{candidate_id}/screen", "effect": "write"},
+    },
+    "seo": {
+        "read_get_keyword": {"method": "GET", "path": "/keywords/{keyword_id}", "effect": "read"},
+        "read_get_page_audit": {"method": "GET", "path": "/pages/{page_id}/audit", "effect": "read"},
+        "read_list_audit_reports": {"method": "GET", "path": "/audit-reports", "effect": "read"},
+        "read_list_keywords": {"method": "GET", "path": "/keywords", "effect": "read"},
+        "read_list_link_plans": {"method": "GET", "path": "/link-plans", "effect": "read"},
+        "read_list_links": {"method": "GET", "path": "/links", "effect": "read"},
+        "read_list_pages": {"method": "GET", "path": "/pages", "effect": "read"},
+        "write_save_audit_report": {"method": "POST", "path": "/audit-reports", "effect": "write"},
+        "write_save_content_brief": {"method": "POST", "path": "/briefs", "effect": "write"},
+        "write_save_link_plan": {"method": "POST", "path": "/link-plans", "effect": "write"},
+        "write_update_keyword_target": {"method": "POST", "path": "/keywords/{keyword_id}/target", "effect": "write"},
     },
 }
 
