@@ -33,7 +33,8 @@ Usage:
                            {"item_id": 3, "delta": 50})   # write — gate BEFORE calling
     client.is_write("ticketdesk", "write_assign_ticket")  # True
 
-server_kind is "ticketdesk" or "stockroom". Base URLs come from the
+server_kind is one of the keys of SERVERS (ticketdesk, stockroom,
+qa, bookkeeping, sdr, engineering, hrdesk). Base URLs come from the
 TICKETDESK_URL / STOCKROOM_URL env vars (defaults :8101 / :8102), the
 same vars the MCP server files read.
 """
@@ -60,6 +61,31 @@ SERVERS: dict[str, dict[str, Any]] = {
         "server_file": REPO_ROOT / "targets" / "stockroom" / "mcp_server.py",
         "env_var": "STOCKROOM_URL",
         "default_url": "http://localhost:8102",
+    },
+    "qa": {
+        "server_file": REPO_ROOT / "targets" / "qa" / "mcp_server.py",
+        "env_var": "QA_URL",
+        "default_url": "http://localhost:8103",
+    },
+    "bookkeeping": {
+        "server_file": REPO_ROOT / "targets" / "bookkeeping" / "mcp_server.py",
+        "env_var": "BOOKKEEPING_URL",
+        "default_url": "http://localhost:8104",
+    },
+    "sdr": {
+        "server_file": REPO_ROOT / "targets" / "sdr" / "mcp_server.py",
+        "env_var": "SDR_URL",
+        "default_url": "http://localhost:8105",
+    },
+    "engineering": {
+        "server_file": REPO_ROOT / "targets" / "engineering" / "mcp_server.py",
+        "env_var": "ENGINEERING_URL",
+        "default_url": "http://localhost:8106",
+    },
+    "hrdesk": {
+        "server_file": REPO_ROOT / "targets" / "hrdesk" / "mcp_server.py",
+        "env_var": "HRDESK_URL",
+        "default_url": "http://localhost:8107",
     },
 }
 
@@ -89,6 +115,63 @@ TOOL_SPECS: dict[str, dict[str, dict[str, str]]] = {
         "read_pending_orders":      {"method": "GET",  "path": "/orders/pending", "effect": "read"},
         "read_stats_summary":       {"method": "GET",  "path": "/stats/summary", "effect": "read"},
         "write_adjust_item":        {"method": "POST", "path": "/items/{item_id}/adjust", "effect": "write"},
+    },
+    "qa": {
+        "read_get_failure_detail": {"method": "GET", "path": "/failures/{failure_id}", "effect": "read"},
+        "read_list_failures": {"method": "GET", "path": "/failures", "effect": "read"},
+        "read_list_runs": {"method": "GET", "path": "/runs", "effect": "read"},
+        "write_add_triage_note": {"method": "POST", "path": "/triage-notes", "effect": "write"},
+        "write_cluster_failures": {"method": "POST", "path": "/failures/cluster", "effect": "write"},
+        "write_quarantine_test": {"method": "POST", "path": "/tests/quarantine", "effect": "write"},
+        "write_set_regression_verdict": {"method": "POST", "path": "/runs/{run_id}/regression-verdict", "effect": "write"},
+    },
+    "bookkeeping": {
+        "read_chart_of_accounts": {"method": "GET", "path": "/chart", "effect": "read"},
+        "read_find_duplicates": {"method": "GET", "path": "/transactions/duplicates", "effect": "read"},
+        "read_list_accounts": {"method": "GET", "path": "/accounts", "effect": "read"},
+        "read_list_notes": {"method": "GET", "path": "/notes", "effect": "read"},
+        "read_list_receivables": {"method": "GET", "path": "/receivables", "effect": "read"},
+        "read_list_transactions": {"method": "GET", "path": "/transactions", "effect": "read"},
+        "read_list_uncategorised": {"method": "GET", "path": "/transactions/uncategorised", "effect": "read"},
+        "read_reconcile_account": {"method": "GET", "path": "/accounts/{account_id}/reconcile", "effect": "read"},
+        "read_stats_summary": {"method": "GET", "path": "/stats/summary", "effect": "read"},
+        "write_add_finance_note": {"method": "POST", "path": "/notes", "effect": "write"},
+        "write_categorise_transaction": {"method": "POST", "path": "/transactions/{txn_id}/categorise", "effect": "write"},
+        "write_flag_duplicate": {"method": "POST", "path": "/transactions/{txn_id}/flag-duplicate", "effect": "write"},
+        "write_send_reminder": {"method": "POST", "path": "/receivables/{invoice_id}/reminder", "effect": "write"},
+    },
+    "sdr": {
+        "get_account": {"method": "GET", "path": "/accounts/{account_id}", "effect": "read"},
+        "list_accounts": {"method": "GET", "path": "/accounts", "effect": "read"},
+        "list_leads": {"method": "GET", "path": "/leads", "effect": "read"},
+        "research_account": {"method": "GET", "path": "/accounts/{account_id}/research", "effect": "read"},
+        "add_crm_note": {"method": "POST", "path": "/notes", "effect": "write"},
+        "draft_outreach": {"method": "POST", "path": "/leads/{lead_id}/draft", "effect": "write"},
+        "qualify_lead": {"method": "POST", "path": "/leads/{lead_id}/qualify", "effect": "write"},
+        "score_lead": {"method": "POST", "path": "/leads/{lead_id}/score", "effect": "write"},
+    },
+    "engineering": {
+        "read_get_ci_status": {"method": "GET", "path": "/prs/{pr_id}/ci", "effect": "read"},
+        "read_get_issue": {"method": "GET", "path": "/issues/{issue_id}", "effect": "read"},
+        "read_get_pr": {"method": "GET", "path": "/prs/{pr_id}", "effect": "read"},
+        "read_list_issues": {"method": "GET", "path": "/issues", "effect": "read"},
+        "read_stats_summary": {"method": "GET", "path": "/stats/summary", "effect": "read"},
+        "write_add_eng_note": {"method": "POST", "path": "/issues/{issue_id}/note", "effect": "write"},
+        "write_approve_pr": {"method": "POST", "path": "/prs/{pr_id}/approve", "effect": "write"},
+        "write_claim_issue": {"method": "POST", "path": "/issues/{issue_id}/claim", "effect": "write"},
+        "write_open_pr": {"method": "POST", "path": "/prs", "effect": "write"},
+        "write_request_changes": {"method": "POST", "path": "/prs/{pr_id}/request-changes", "effect": "write"},
+        "write_triage_issue": {"method": "POST", "path": "/issues/{issue_id}/triage", "effect": "write"},
+    },
+    "hrdesk": {
+        "read_get_candidate": {"method": "GET", "path": "/candidates/{candidate_id}", "effect": "read"},
+        "read_list_candidates": {"method": "GET", "path": "/candidates", "effect": "read"},
+        "read_list_onboarding": {"method": "GET", "path": "/onboarding", "effect": "read"},
+        "read_stats_summary": {"method": "GET", "path": "/stats/summary", "effect": "read"},
+        "write_add_hr_note": {"method": "POST", "path": "/candidates/{candidate_id}/notes", "effect": "write"},
+        "write_complete_onboarding_step": {"method": "POST", "path": "/onboarding/{candidate_id}/steps/{step_key}/complete", "effect": "write"},
+        "write_schedule_interview": {"method": "POST", "path": "/candidates/{candidate_id}/interviews", "effect": "write"},
+        "write_screen_candidate": {"method": "POST", "path": "/candidates/{candidate_id}/screen", "effect": "write"},
     },
 }
 

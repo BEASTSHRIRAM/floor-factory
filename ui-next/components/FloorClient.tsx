@@ -13,7 +13,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import FloorShell, { type ConsoleMode, type DemoPhase, type ShellStats } from "./ao/FloorShell";
+import FloorShell, {
+  type AutoRunStatus,
+  type ConsoleMode,
+  type DemoPhase,
+  type FloorTrustMode,
+  type ShellStats,
+} from "./ao/FloorShell";
 import FloorBoard from "./ao/FloorBoard";
 import FloorInspector from "./ao/FloorInspector";
 import PayrollDialog from "./PayrollDialog";
@@ -49,6 +55,20 @@ const EVENT_TYPES = [
   "review.completed", "appeal.filed", "appeal.decided", "payment.made",
   "cycle.closed", "agent.fired", "agent.hired", "narration",
   "tool.proposed", "tool.confirmation_requested", "system.tools_updated",
+  "confirmation.auto_approved", "mode.changed",
+  "auto.started", "auto.paused", "auto.stopped", "auto.cycle_started",
+];
+
+/* Department filter for the board — keys match the API's
+   /state/jobs department field. */
+const DEPT_FILTERS: { key: string; label: string }[] = [
+  { key: "all", label: "All departments" },
+  { key: "support", label: "Support" },
+  { key: "qa", label: "QA triage" },
+  { key: "bookkeeping", label: "Bookkeeping" },
+  { key: "sdr", label: "SDR" },
+  { key: "engineering", label: "Engineering" },
+  { key: "hr", label: "HR" },
 ];
 
 /* Mode switches (offline hero → replay, replay → live) are the two big
@@ -81,6 +101,8 @@ function describeEvent(type: string, p: Record<string, unknown>, who: string): s
       return `${who} won the job${price !== undefined ? ` at ${credits(price)}` : ""}`;
     case "tool.executed":
       return `${who} ran ${tool ? String(tool) : "a tool"} via Synapse MCP`;
+    case "confirmation.auto_approved":
+      return `Gate auto-approved ${tool ? String(tool) : "a write"} — auto mode, no human at the gate; the approval is in the audit log`;
     case "work.submitted":
       return `${who} submitted work for review`;
     case "review.completed":
@@ -127,6 +149,12 @@ export default function FloorClient() {
      screen — and it is always badged as recorded, never as live. */
   const [mode, setMode] = useState<ConsoleMode>("live");
   const [demoPhase, setDemoPhase] = useState<DemoPhase>("idle");
+  /* Trust mode (manual gate vs auto run) — server-side state from
+     /mode + /auto/status, polled while live. Distinct from the
+     live/demo ConsoleMode above. */
+  const [floorMode, setFloorMode] = useState<FloorTrustMode | null>(null);
+  const [autoStatus, setAutoStatus] = useState<AutoRunStatus | null>(null);
+  const [deptFilter, setDeptFilter] = useState("all");
   const [apiUp, setApiUp] = useState(false);
   const [graceDone, setGraceDone] = useState(false);
   const [liveEpoch, setLiveEpoch] = useState(0);
@@ -307,6 +335,28 @@ export default function FloorClient() {
     }
   }, []);
 
+  /* ---------- trust mode (manual gate / auto run) ---------- */
+  const fetchModeState = useCallback(async () => {
+    try {
+      const d = (await fetchJSON("/mode")) as Record<string, unknown>;
+      const m = pick(d, "mode");
+      if (m === "manual" || m === "auto") setFloorMode(m);
+      const ar = pick(d, "auto_run") as AutoRunStatus | undefined;
+      if (ar && typeof ar === "object") setAutoStatus(ar);
+    } catch { /* API offline — the toggle simply stays hidden */ }
+    try {
+      const s = (await fetchJSON("/auto/status")) as AutoRunStatus;
+      if (s && typeof s === "object" && "status" in s) setAutoStatus(s);
+    } catch { /* API offline */ }
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "live") return;
+    void fetchModeState();
+    const iv = setInterval(() => void fetchModeState(), 4000);
+    return () => clearInterval(iv);
+  }, [mode, fetchModeState, liveEpoch]);
+
   /* ---------- events ---------- */
   const handleEvent = useCallback(
     (ev: FloorEvent) => {
@@ -330,7 +380,7 @@ export default function FloorClient() {
       if (logJobId !== undefined && type !== "narration") {
         const who = nameOf(p);
         let tone: FloorEventLogItem["tone"] = "neutral";
-        if (type === "payment.made" || type === "agent.hired") tone = "good";
+        if (type === "payment.made" || type === "agent.hired" || type === "confirmation.auto_approved") tone = "good";
         else if (type === "agent.fired" || type === "appeal.filed") tone = "warn";
         else if (type === "appeal.decided") tone = /upheld|accept|overturn/i.test(text) ? "good" : "warn";
         else if (type === "review.completed") tone = /reject/i.test(text) ? "warn" : "good";
@@ -505,6 +555,28 @@ export default function FloorClient() {
           if (hid !== undefined) setAgentPresence(String(hid), { state: "idle" });
           break;
         }
+        case "confirmation.auto_approved": {
+          const tool = pick(p, "tool_name", "tool");
+          setTicker((prev) =>
+            [
+              ...prev,
+              {
+                key: keyRef.current++,
+                who: "Gate",
+                text: `auto-approved ${tool ? String(tool) : "a write"} on "${jobTitleOf(p)}" (auto mode — logged, no human at the gate)`,
+              },
+            ].slice(-24)
+          );
+          break;
+        }
+        case "mode.changed":
+        case "auto.started":
+        case "auto.paused":
+        case "auto.stopped":
+        case "auto.cycle_started":
+          void fetchModeState();
+          if (text) narrate(text);
+          break;
         case "narration":
           narrate(text);
           break;
@@ -513,7 +585,7 @@ export default function FloorClient() {
           break;
       }
     },
-    [loadSnapshot, nameOf, jobTitleOf, narrate, resolveAgentId, workerIdForJob, workerIdForWorkOrder, jobIdForWorkOrder, setAgentPresence, flashPaid]
+    [loadSnapshot, nameOf, jobTitleOf, narrate, resolveAgentId, workerIdForJob, workerIdForWorkOrder, jobIdForWorkOrder, setAgentPresence, flashPaid, fetchModeState]
   );
 
   useEffect(() => {
@@ -787,6 +859,62 @@ export default function FloorClient() {
     }
   }, [loadSnapshot, showToast]);
 
+  const onFloorModeChange = useCallback(
+    async (m: FloorTrustMode) => {
+      try {
+        await postJSON("/mode", { mode: m });
+        setFloorMode(m);
+        showToast(
+          m === "auto"
+            ? "Auto mode — writes are auto-approved and logged; the floor can run itself up to a cap."
+            : "Manual mode — every write waits for a human at the confirmation gate."
+        );
+        void fetchModeState();
+      } catch {
+        showToast("Could not switch mode — is the factory API up?", true);
+      }
+    },
+    [fetchModeState, showToast]
+  );
+
+  const onAutoStart = useCallback(
+    async (cap: number) => {
+      try {
+        await postJSON("/auto/start", { budget_cap_credits: cap });
+        showToast(`Auto run started — the floor runs itself up to a ${credits(cap)} cap.`);
+        void fetchModeState();
+      } catch {
+        showToast("Could not start the auto run — check the cap and that no shift is running.", true);
+      }
+    },
+    [fetchModeState, showToast]
+  );
+
+  const onAutoPause = useCallback(async () => {
+    try {
+      await postJSON("/auto/pause");
+      showToast("Auto run pausing — the current cycle finishes first.");
+      void fetchModeState();
+    } catch {
+      showToast("Could not pause the auto run.", true);
+    }
+  }, [fetchModeState, showToast]);
+
+  const onAutoStop = useCallback(async () => {
+    try {
+      await postJSON("/auto/stop");
+      showToast("Auto run stopped.");
+      void fetchModeState();
+    } catch {
+      showToast("Could not stop the auto run.", true);
+    }
+  }, [fetchModeState, showToast]);
+
+  const visibleJobs = useMemo(
+    () => (deptFilter === "all" ? jobs : jobs.filter((j) => (j.department ?? "support") === deptFilter)),
+    [jobs, deptFilter]
+  );
+
   const demo = mode === "demo";
   const onRun = demo ? startReplay : onRunLive;
   const onReset = demo ? resetReplay : onResetLive;
@@ -816,6 +944,12 @@ export default function FloorClient() {
         connected={connected}
         mode={mode}
         demoPhase={demoPhase}
+        floorMode={demo ? null : floorMode}
+        autoStatus={demo ? null : autoStatus}
+        onFloorModeChange={(m) => void onFloorModeChange(m)}
+        onAutoStart={(cap) => void onAutoStart(cap)}
+        onAutoPause={() => void onAutoPause()}
+        onAutoStop={() => void onAutoStop()}
         running={runBusy}
         onRun={onRun}
         onReset={onReset}
@@ -829,11 +963,37 @@ export default function FloorClient() {
         ticker={ticker}
         pinkSlips={pinkSlips}
         board={
-          <FloorBoard
-            jobs={jobs}
-            selectedId={selection?.kind === "job" ? selection.id : null}
-            onSelect={(j) => setSelection({ kind: "job", id: j.id })}
-          />
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 pb-1 pt-3" role="group" aria-label="Filter jobs by department">
+              {DEPT_FILTERS.map((d) => {
+                const n = d.key === "all" ? jobs.length : jobs.filter((j) => (j.department ?? "support") === d.key).length;
+                const active = deptFilter === d.key;
+                return (
+                  <button
+                    key={d.key}
+                    type="button"
+                    onClick={() => setDeptFilter(d.key)}
+                    aria-pressed={active}
+                    className={`rounded-full border px-2.5 py-1 text-2xs font-medium transition-colors ${
+                      active
+                        ? "border-transparent bg-primary text-primary-foreground"
+                        : "border-border text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {d.label}
+                    <span className="ml-1.5 font-mono tabular-nums opacity-75">{n}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="min-h-0 flex-1">
+              <FloorBoard
+                jobs={visibleJobs}
+                selectedId={selection?.kind === "job" ? selection.id : null}
+                onSelect={(j) => setSelection({ kind: "job", id: j.id })}
+              />
+            </div>
+          </div>
         }
         inspector={
           selection ? (

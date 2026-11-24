@@ -80,9 +80,12 @@ export default function FloorBoard({
             }
             error={failed ? "Rejected in review — no payment made." : undefined}
             footer={
-              footer ? (
-                <div className="border-t border-border px-3.5 py-2 text-2xs text-muted-foreground">{footer}</div>
-              ) : undefined
+              <div className="flex items-center gap-2 border-t border-border px-3.5 py-2 text-2xs text-muted-foreground">
+                <span className="shrink-0 rounded-full border border-border bg-interactive-hover px-1.5 py-0.5 font-medium text-foreground">
+                  {job.department_label ?? "Support"}
+                </span>
+                {footer && <span className="min-w-0 truncate">{footer}</span>}
+              </div>
             }
           />
         );

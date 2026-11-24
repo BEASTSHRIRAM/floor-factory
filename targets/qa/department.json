@@ -1,0 +1,124 @@
+{
+  "base_url": {
+    "default": "http://localhost:8103",
+    "env_var": "QA_URL"
+  },
+  "checks_module": "targets/qa/checks.py",
+  "department_id": "qa",
+  "display_name": "QA triage",
+  "integration_notes": [
+    "Add server_kind 'qa' to mcp_manager/client.py SERVERS (server_file targets/qa/mcp_server.py, env_var QA_URL, default_url http://localhost:8103) and to its TOOL_SPECS from tool_specs below; mirror the same entry in orchestrator/tools.py TOOL_SPECS + _BASE_URLS.",
+    "Path params used by tool paths: failure_id, run_id \u2014 orchestrator/tools.py _PATH_PARAMS must learn both names for the direct fallback.",
+    "Job posting: translate jobs.json templates into engine Family entries (key/title/brief/budget/criteria) with department 'qa'; the worker executor dispatches on family key exactly like the TicketDesk families, calling only the tools in each template's tools_expected.",
+    "Reviewer: checks.py exposes CHECKS[family_key](call, criterion, **args) with the same finding shape as engine.verify() \u2014 wire it into the review step for qa jobs.",
+    "mcp_server.py is the generated-style stand-in for `synapse build --local --auto`, identical in construction to TicketDesk's (the pattern this repo actually runs). See synapse_status."
+  ],
+  "jobs_pack": "targets/qa/jobs.json",
+  "mcp_server_file": "targets/qa/mcp_server.py",
+  "port": 8103,
+  "reset": {
+    "behaviour": "Deletes qa.db and reseeds the exact seeded dataset (6 runs, 25 failures, no clusters/quarantines/verdicts/notes). Same semantics as TicketDesk's reset.",
+    "endpoint": "POST /admin/reset (internal \u2014 NOT exposed as a tool)",
+    "script": "python3 targets/qa/reset.py"
+  },
+  "seed": {
+    "counts": {
+      "failures": 25,
+      "runs": 6,
+      "suites": [
+        "checkout",
+        "auth",
+        "search",
+        "payments",
+        "notifications"
+      ],
+      "tests": 13
+    },
+    "script": "python3 targets/qa/seed.py"
+  },
+  "service": {
+    "app_file": "targets/qa/app.py",
+    "db_file": "targets/qa/qa.db",
+    "health": "GET /health (internal \u2014 NOT exposed as a tool)",
+    "run": "uvicorn app:app --port 8103 (from targets/qa/)"
+  },
+  "synapse_status": {
+    "flow_attempted": "npx @2ndbrainlabs-ai/synapse-cli v0.1.9 IS reachable headlessly. The real build was attempted on 2026-11-24 in targets/qa with the app running on :8103: `synapse build --local --auto --all-endpoints`. It stopped before scanning with: 'Groq not ready - Groq API key required. Set GROQ_API_KEY, or run `synapse model set groq --save-key <key>`.' GROQ_API_KEY is not present in this environment (it lives in the Secure Vault; this task did not authorize retrieving it), so no synapse_auto_server.py was generated. The repo's established pattern (TicketDesk, StockRoom) is the generated-style mcp_server.py stand-in committed in-tree, with synapse_auto_server.py as the documented real-build artifact name (ARCHITECTURE 4.2) - qa follows it.",
+    "mcp_step": "PENDING \u2014 run `synapse build --local --auto --endpoints \"GET /runs,GET /failures,GET /failures/{failure_id},POST /failures/cluster,POST /tests/quarantine,POST /runs/{run_id}/regression-verdict,POST /triage-notes\"` in targets/qa/ once a Groq key is available, and drop the output in as synapse_auto_server.py beside mcp_server.py. The direct-mode tool layer below is complete and verified, so integration does not block on this."
+  },
+  "tool_specs": {
+    "read_get_failure_detail": {
+      "effect": "read",
+      "method": "GET",
+      "path": "/failures/{failure_id}"
+    },
+    "read_list_failures": {
+      "effect": "read",
+      "method": "GET",
+      "path": "/failures"
+    },
+    "read_list_runs": {
+      "effect": "read",
+      "method": "GET",
+      "path": "/runs"
+    },
+    "write_add_triage_note": {
+      "effect": "write",
+      "method": "POST",
+      "path": "/triage-notes"
+    },
+    "write_cluster_failures": {
+      "effect": "write",
+      "method": "POST",
+      "path": "/failures/cluster"
+    },
+    "write_quarantine_test": {
+      "effect": "write",
+      "method": "POST",
+      "path": "/tests/quarantine"
+    },
+    "write_set_regression_verdict": {
+      "effect": "write",
+      "method": "POST",
+      "path": "/runs/{run_id}/regression-verdict"
+    }
+  },
+  "tools": [
+    {
+      "description": "List CI runs, newest first, each with failure_count, new_failure_count and any recorded regression verdict.",
+      "effect": "read",
+      "name": "read_list_runs"
+    },
+    {
+      "description": "List failures filtered by run / suite / status / signature / test name / cluster; each shows its cluster assignment and whether its signature is new in its run.",
+      "effect": "read",
+      "name": "read_list_failures"
+    },
+    {
+      "description": "Fetch one failure with its cluster, the full pass/fail history of its test across all runs, signature stats (first-seen run, totals) and the test's quarantine state.",
+      "effect": "read",
+      "name": "read_get_failure_detail"
+    },
+    {
+      "description": "Group unclustered failures by error signature: creates one cluster per signature and assigns every matching failure to it (optionally only within one run). Confirm-gated.",
+      "effect": "write",
+      "name": "write_cluster_failures"
+    },
+    {
+      "description": "Mark a test as flaky and quarantine it; its open failures move to status 'quarantined'. Confirm-gated.",
+      "effect": "write",
+      "name": "write_quarantine_test"
+    },
+    {
+      "description": "Record a run's regression verdict ('regression' | 'no_regression'); a non-empty note is stored as a triage note on the run. Confirm-gated.",
+      "effect": "write",
+      "name": "write_set_regression_verdict"
+    },
+    {
+      "description": "Add a triage note to a failure, cluster, run, or test. Confirm-gated.",
+      "effect": "write",
+      "name": "write_add_triage_note"
+    }
+  ],
+  "workplace": "QADesk \u2014 CI test-run / failure system of record"
+}

@@ -36,12 +36,24 @@ Headless alternative (no API): `python -m orchestrator.engine --cycles 2 --reset
 | `GET /approvals` | pending write confirmations (manual gate mode) |
 | `POST /approvals/{confirmation_id}` | `{"approved": bool, "by": "human"}` — resolves a gated write |
 | `POST /confirmations/{confirmation_id}` | alias of the above |
+| `GET /mode` | floor mode (`manual`\|`auto`), gate state, auto-run state, recent auto-approvals |
+| `POST /mode` | `{"mode": "auto", "by": "human"}` — set the floor mode (emits `mode.changed`) |
+| `POST /auto/start` | `{"budget_cap_credits": 1000, "by": "human"}` — start/resume auto-run (idempotent) |
+| `POST /auto/pause` | pause auto-run at the next cycle boundary |
+| `POST /auto/stop` | stop auto-run at the next cycle boundary |
+| `GET /auto/status` | auto-run state only |
 
 If `repo/ui/index.html` exists it is served at `/` (mounted last; API routes win).
 
-## Confirmation gate modes
+## Floor modes (manual / auto)
 
-`POLICY_AUTO_APPROVE_WRITES` (default `true`): writes auto-approve as
-`confirmed_by='policy'` and are logged. Set it to `false` to require a human
-decision per write via the approvals endpoints; unresolved writes are denied
-after `FLOOR_CONFIRM_TIMEOUT_S` seconds (default 120).
+Full semantics in `docs/MODES.md`. Short version: the gate branches on the
+floor mode (`orchestrator/mode.py`, default **manual**). Manual: every
+write waits for a human decision via the approvals endpoints; unresolved
+writes are denied after `FLOOR_CONFIRM_TIMEOUT_S` seconds (default 120).
+Auto: writes auto-approve as `confirmed_by='auto'`, each one audited with a
+`confirmation.auto_approved` event, and the auto-run loop runs cycle after
+cycle inside a human-set budget cap until it is paused/stopped, the mode
+switches back to manual, or the cap is reached. Boot seeding: `FLOOR_MODE`
+env, else an explicitly set `POLICY_AUTO_APPROVE_WRITES` (`true` → auto,
+`false` → manual), else manual.

@@ -73,6 +73,33 @@ export function isManagement(a: Agent): boolean {
   return /manager|review|reviewer|cfo/.test(role) || /manager|reviewer|cfo/.test(tier);
 }
 
+/* Job title -> department, mirroring the API's family registry.
+   Snapshot jobs carry the department explicitly; live job.posted
+   events do not, so event-born jobs resolve their department here
+   (audit jobs share their family's title once the prefix is stripped). */
+export const TITLE_DEPARTMENT: Record<string, [string, string]> = {
+  "Triage the unassigned queue": ["support", "Support"],
+  "Merge the duplicates": ["support", "Support"],
+  "Close the stale resolved tickets": ["support", "Support"],
+  "SLA breach sweep + escalation": ["support", "Support"],
+  "Normalise ticket categories": ["support", "Support"],
+  "VIP save: calm the angry customers": ["support", "Support"],
+  "Cluster the overnight failures": ["qa", "QA triage"],
+  "Quarantine the flaky tests": ["qa", "QA triage"],
+  "Regression verdict for the overnight run": ["qa", "QA triage"],
+  "Categorise the uncategorised queue": ["bookkeeping", "Bookkeeping"],
+  "Flag the duplicate transactions": ["bookkeeping", "Bookkeeping"],
+  "Reconcile the operating account": ["bookkeeping", "Bookkeeping"],
+  "Chase overdue receivables (+3/+15/+30)": ["bookkeeping", "Bookkeeping"],
+  "Research and score the new-lead batch": ["sdr", "SDR"],
+  "Draft outreach for qualified accounts": ["sdr", "SDR"],
+  "Work an engineering issue and open a PR": ["engineering", "Engineering"],
+  "Triage the unlabelled issues": ["engineering", "Engineering"],
+  "Screen the new applicant batch": ["hr", "HR"],
+  "Schedule interviews for screening passers": ["hr", "HR"],
+  "Complete onboarding paperwork for this week's joiners": ["hr", "HR"],
+};
+
 export function normalizeJob(raw: unknown): Job {
   const j = (raw ?? {}) as Record<string, unknown>;
   const bids = Array.isArray(j.bids) ? (j.bids as Bid[]) : [];
@@ -98,6 +125,20 @@ export function normalizeJob(raw: unknown): Job {
       return b === undefined ? undefined : num(b);
     })(),
     system: (pick(j, "system", "target_system", "target", "system_id") as string) ?? undefined,
+    department: (() => {
+      const explicit = pick(j, "department") as string | undefined;
+      if (explicit) return explicit;
+      const t = String(pick(j, "title", "name") ?? "");
+      const base = t.startsWith("Audit: ") ? t.slice("Audit: ".length) : t;
+      return TITLE_DEPARTMENT[base]?.[0] ?? "support";
+    })(),
+    department_label: (() => {
+      const explicit = pick(j, "department_label") as string | undefined;
+      if (explicit) return explicit;
+      const t = String(pick(j, "title", "name") ?? "");
+      const base = t.startsWith("Audit: ") ? t.slice("Audit: ".length) : t;
+      return TITLE_DEPARTMENT[base]?.[1] ?? "Support";
+    })(),
     winner: winner ?? undefined,
     severity: (pick(j, "severity") as string) ?? undefined,
     bids,
@@ -135,11 +176,11 @@ export async function fetchJSON(path: string): Promise<unknown> {
   return r.json();
 }
 
-export async function postJSON(path: string): Promise<unknown> {
+export async function postJSON(path: string, body?: Record<string, unknown>): Promise<unknown> {
   const r = await fetch(`${API_BASE}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: "{}",
+    body: JSON.stringify(body ?? {}),
   });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json().catch(() => ({}));

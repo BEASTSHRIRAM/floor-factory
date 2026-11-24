@@ -27,6 +27,10 @@ Two things are broken about AI agents at work today:
 
 The demo workplace is **TicketDesk**, an ordinary FastAPI support-ticket API seeded with ~40 messy tickets (duplicates, SLA breaches, unassigned P1s, inconsistent categories). Job families: SLA breach sweep, duplicate collapse, backlog triage, and a cross-system VIP save in the finale. A second system, **StockRoom** (inventory), joins live in the finale.
 
+**Six departments are live, not one.** The same market loop runs across six workplaces, each its own real system of record with its own Synapse-shaped tool surface and its own deterministic acceptance checks: **Support** (TicketDesk + StockRoom), **QA triage** (failure clustering, flaky-test quarantine, regression verdicts), **Bookkeeping** (categorisation, duplicate flagging, reconciliation, receivables — the tools move no money), **SDR** (rubric-scored lead research, outreach *drafts only* — no send tool exists), **Engineering** (issue work + PRs with CI as the check; humans merge), and **HR** (rubric screening, interview scheduling, onboarding paperwork — no hire/reject tool exists). One roster bids across every department; every job clears the same review → blind appeal → payroll machinery. In the verified integration shift, a single cycle posted 19 jobs across all six departments and every one was accepted and paid.
+
+**Two trust modes.** The confirmation gate has two settings, switchable live from the console: **Manual** — every write waits for a human at the gate; **Auto** — writes are auto-approved, each one written to the audit log as a `confirmation.auto_approved` event, and the floor runs itself cycle after cycle until a human-set budget cap stops it (the loop projects the next cycle's spend and stops *before* crossing the cap).
+
 ## Why Synapse is central — Synapse is the factory's only hands
 
 Synapse is not a component of THE FLOOR; it is the precondition for it. Four ways:
@@ -43,17 +47,30 @@ Although we enter Track 4, THE FLOOR is deliberately built to also clear the oth
 ## Architecture
 
 ```
-ui/            Mission-control web UI (org chart, job board, bid ticker,
-               ledger + narration feeds) — REST snapshots + SSE event stream
-api/           FastAPI — REST state endpoints, SSE event bus, run/reset
-orchestrator/  LangGraph graphs: shift loop, worker, reviewer, blind appeal
+ui-next/       Mission-control console — agent-orchestrator's own frontend
+               (vendored with attribution, Apache-2.0), recoloured to a
+               warm-dark palette; job board with department filter, roster,
+               inspector, ledger + event stream, payroll dialog, Manual/Auto
+               trust-mode controls, and a recorded-demo replay for hosted
+               viewing — REST snapshots + SSE event stream
+api/           FastAPI — REST state endpoints, SSE event bus, run/reset,
+               mode + auto-run endpoints (cap, start/pause/stop)
+orchestrator/  Shift loop, worker, reviewer, blind appeal; department
+               registration from each workplace's own jobs pack; the
+               agent-orchestrator lifecycle state machine + supervised
+               worker runner ported in (ao_lifecycle.py, ao_runner.py)
 economy/       Ledger, payroll/CFO, reputation — deterministic Python, no LLM
 mcp_manager/   Spawns & supervises Synapse MCP servers, tool registry,
                read/write classification, confirmation enforcement
 onboarder/     Wraps `synapse build` / `synapse build --discover` runs
 targets/
-  ticketdesk/  Target system #1 — FastAPI support-ticket API (:8101)
-  stockroom/   Target system #2 — inventory API (joins in the finale)
+  ticketdesk/  Support — FastAPI support-ticket API (:8101)
+  stockroom/   Support — inventory API (:8102, joins in the finale)
+  qa/          QA triage — test-run results API (:8103)
+  bookkeeping/ Bookkeeping — accounting API (:8104)
+  sdr/         SDR — CRM API (:8105)
+  engineering/ Engineering — repo/issues API (:8106)
+  hrdesk/      HR — candidates/onboarding API (:8107)
 ```
 
 Key invariants:
@@ -66,6 +83,7 @@ Key invariants:
 
 - **Exposure is the first safety decision.** Delete and bulk-close endpoints are never exposed as tools, so no prompt, bug, or confused agent can invoke them — the capability does not exist on the Floor.
 - **Writes pass a confirmation gate.** Read tools execute immediately; write tools require confirmation before dispatch, and the MCP manager independently refuses any write call that arrives without a confirmation. Denials are fed back to the worker as an observation it must adapt to.
+- **The gate has two trust modes, and Auto is not "ungated".** In Manual mode a human approves each write. In Auto mode the floor runs unattended, but every auto-approval is emitted as an auditable `confirmation.auto_approved` event (tool, args, work order), the run is bounded by a budget cap the loop will not cross, and switching back to Manual re-gates the very next write. Human-only powers are enforced by *absent tools*, not policy text: Bookkeeping cannot move money, SDR cannot send, Engineering cannot merge, HR cannot hire or reject.
 - **Deterministic checks before LLM judgement.** Machine-checkable acceptance criteria (e.g. "zero unassigned tickets remain", "every breached ticket has an escalation comment") are verified in code before the Reviewer reads anything.
 - **The human gate is small and final:** a person approves the results batch. Hiring, firing, payroll, and appeals are autonomous — that is the product's point — but no batch of real-world changes is closed without a human signature.
 
@@ -107,6 +125,10 @@ python3 reset.py            # restore the exact seeded state at any time
 - CFO payroll: firing on two consecutive negative cycles (PinkSlip) and mutated replacement hires with visible lineage.
 - Confirmation gate on write tools; deliberate endpoint exposure (no delete/bulk-close tools exist).
 - Mission-control UI: live org chart, job board with bid ticker, ledger and narration feeds, payroll/firing highlights.
+- **Six live departments** (Support, QA triage, Bookkeeping, SDR, Engineering, HR) — 20 job families, one roster bidding across all of them, each department verified by its own deterministic checks.
+- **Manual/Auto trust modes** in the console: a topbar toggle, an auto-run panel (budget cap, start/pause/stop, spent-vs-cap), and auto-approvals surfaced in the audit stream.
+- **agent-orchestrator adoption, twice:** its frontend is the console (vendored with attribution), and its orchestration core — the work-order lifecycle state machine and the supervised worker runner — is ported into the engine, emitting lifecycle events alongside the economy's own.
+- **The Foreman**, the floor's mascot (clay-orange robot foreman), across the landing page and console, with dedicated poses for payroll and PinkSlip moments.
 - The StockRoom `--discover` finale: one new endpoint + `synapse build --discover` teaches the factory a capability it did not have minutes earlier.
 
 **Cut or reduced, per the pre-agreed cut order** (appeal → mutation lineage → live `--discover` → custom composed tool → UI theatre → backlog-scan intake → multi-cycle payroll):
