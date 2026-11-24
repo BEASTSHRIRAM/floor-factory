@@ -53,7 +53,11 @@ CREATE TABLE IF NOT EXISTS agents (
     hired_cycle         INTEGER NOT NULL DEFAULT 0,       -- cycle_no when hired (grace period)
     created_at          TEXT NOT NULL,
     fired_at            TEXT,
-    fire_reason         TEXT
+    fire_reason         TEXT,
+    price_factor        REAL NOT NULL DEFAULT 1.0,        -- operator-set bid price multiplier (suggest_bid)
+    origin              TEXT NOT NULL DEFAULT 'seeded',   -- seeded | mutation | user-created
+    department          TEXT,                             -- set for user-created specialists
+    family_key          TEXT                              -- job family a user-created specialist works
 );
 
 CREATE TABLE IF NOT EXISTS target_systems (
@@ -224,6 +228,26 @@ def get_conn(db_path=None) -> sqlite3.Connection:
     return conn
 
 
+# Columns added to `agents` after the table first shipped (operator-created
+# agents: bid price factor, origin, and the department/family a specialist
+# works). init_db migrates older floor DBs in place — the live floor.db
+# predates them. Same pattern as harness.py's agent_lessons migration.
+_AGENT_COLUMNS = {
+    "price_factor": "REAL NOT NULL DEFAULT 1.0",
+    "origin": "TEXT NOT NULL DEFAULT 'seeded'",
+    "department": "TEXT",
+    "family_key": "TEXT",
+}
+
+
+def _migrate_agent_columns(conn: sqlite3.Connection) -> None:
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(agents)")}
+    for col, decl in _AGENT_COLUMNS.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {decl}")
+    conn.commit()
+
+
 def init_db(db_path=None, reset: bool = False) -> sqlite3.Connection:
     """Create (or, with reset=True, drop and recreate) the schema. Returns a connection."""
     path = Path(db_path) if db_path is not None else default_db_path()
@@ -236,6 +260,7 @@ def init_db(db_path=None, reset: bool = False) -> sqlite3.Connection:
     conn = get_conn(path)
     conn.executescript(SCHEMA)
     conn.commit()
+    _migrate_agent_columns(conn)
     return conn
 
 

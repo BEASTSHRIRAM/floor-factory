@@ -20,6 +20,7 @@ from .db import emit_event, now_iso
 
 __all__ = [
     "REVIEW_FEE", "APPEAL_FEE",
+    "PRICE_FACTOR_MIN", "PRICE_FACTOR_MAX", "PRICE_FACTOR_DEFAULT",
     "REP_ACCEPT", "REP_REJECT", "REP_APPEAL_WORKER", "REP_APPEAL_REVIEWER_A",
     "seed_roster", "create_agent", "get_agent", "list_agents",
     "ledger_write", "get_balance", "verify_ledger_chain", "apply_reputation",
@@ -31,6 +32,15 @@ __all__ = [
 
 REVIEW_FEE = 10          # credits paid to a reviewer per completed review
 APPEAL_FEE = 15          # credits charged to a worker to file an appeal (win or lose)
+
+# Operator-set bid pricing (POST /agents): an agent's price_factor scales
+# the base term of suggest_bid's price fraction. 1.0 = the typical agent;
+# lower bids cheaper and wins more work; higher bids dearer and earns more
+# per job. Every pre-existing agent carries the default, so their bids are
+# unchanged.
+PRICE_FACTOR_MIN = 0.5
+PRICE_FACTOR_MAX = 1.5
+PRICE_FACTOR_DEFAULT = 1.0
 REP_ACCEPT = 4.0
 REP_REJECT = -6.0
 REP_APPEAL_WORKER = 3.0
@@ -69,18 +79,32 @@ def create_agent(conn: sqlite3.Connection, name: str, *, role: str = "worker",
                  tier: str = "junior", base_salary_credits: int = 0,
                  risk_appetite: float = 0.5, reputation: float = 50.0,
                  parent_agent_id: int | None = None, generation: int = 1,
-                 mutation_note: str | None = None, hired_cycle: int = 0) -> int:
-    """Insert an agent + its initial reputation event. Returns agent id."""
+                 mutation_note: str | None = None, hired_cycle: int = 0,
+                 price_factor: float = PRICE_FACTOR_DEFAULT,
+                 origin: str = "seeded",
+                 department: str | None = None,
+                 family_key: str | None = None) -> int:
+    """Insert an agent + its initial reputation event. Returns agent id.
+
+    The last four kwargs carry the operator-created-agent fields (used by
+    POST /agents; seeded/mutated hires take the defaults, except that a
+    mutated replacement inherits its parent's beat and price — see
+    hire_mutated_replacement).
+    """
     reputation = max(0.0, min(100.0, float(reputation)))
+    price_factor = max(PRICE_FACTOR_MIN,
+                       min(PRICE_FACTOR_MAX, float(price_factor)))
     with conn:
         cur = conn.execute(
             """INSERT INTO agents (name, role, persona_prompt, model, tier,
                    base_salary_credits, risk_appetite, status, parent_agent_id,
-                   generation, mutation_note, reputation, hired_cycle, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
+                   generation, mutation_note, reputation, hired_cycle, created_at,
+                   price_factor, origin, department, family_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, role, persona_prompt, model, tier, int(base_salary_credits),
              float(risk_appetite), parent_agent_id, int(generation), mutation_note,
-             reputation, int(hired_cycle), now_iso()),
+             reputation, int(hired_cycle), now_iso(),
+             price_factor, origin, department, family_key),
         )
         agent_id = cur.lastrowid
         if reputation != 0.0:
@@ -230,7 +254,11 @@ def suggest_bid(conn: sqlite3.Connection, agent_id: int, job_id: int) -> tuple[i
     """Deterministic bid suggestion from an agent's traits. Returns (price, confidence, rationale).
 
     Expensive/high-salary agents bid near the cap; risk appetite raises price
-    slightly and lowers care; reputation drives confidence.
+    slightly and lowers care; reputation drives confidence. The operator-set
+    price_factor (agents.price_factor, default 1.0) scales the base term:
+    fraction = 0.55 * price_factor + 0.25 * risk + salary pressure — so a
+    custom agent priced at 0.6 bids measurably cheaper than an identical
+    agent at 1.0, and one at 1.4 measurably dearer.
     """
     agent = get_agent(conn, agent_id)
     job = get_job(conn, job_id)
@@ -238,13 +266,15 @@ def suggest_bid(conn: sqlite3.Connection, agent_id: int, job_id: int) -> tuple[i
         raise ValueError("agent or job not found")
     cap = job["budget_credits"]
     salary_pressure = min(agent["base_salary_credits"] / max(cap, 1), 0.45)
-    fraction = 0.55 + 0.25 * agent["risk_appetite"] + salary_pressure
+    price_factor = float(agent.get("price_factor") or PRICE_FACTOR_DEFAULT)
+    fraction = 0.55 * price_factor + 0.25 * agent["risk_appetite"] + salary_pressure
     price = max(1, min(cap, round(cap * fraction)))
     confidence = round(max(0.05, min(0.99, agent["reputation"] / 100.0
                                       + 0.1 * (agent["risk_appetite"] - 0.5))), 2)
     rationale = (f"{agent['name']}: price {price}/{cap} from salary pressure "
                  f"{salary_pressure:.2f} + risk {agent['risk_appetite']:.2f}; "
-                 f"confidence from reputation {agent['reputation']:.0f}")
+                 f"confidence from reputation {agent['reputation']:.0f}; "
+                 f"price factor {price_factor:.2f}")
     return price, confidence, rationale
 
 
@@ -591,7 +621,11 @@ def hire_mutated_replacement(conn: sqlite3.Connection, parent_agent_id: int,
         conn, name, role=parent["role"], persona_prompt=persona, model=model,
         tier=parent["tier"], base_salary_credits=parent["base_salary_credits"],
         risk_appetite=risk, reputation=50.0, parent_agent_id=parent_agent_id,
-        generation=generation, mutation_note=note, hired_cycle=cycle_no)
+        generation=generation, mutation_note=note, hired_cycle=cycle_no,
+        price_factor=float(parent.get("price_factor") or PRICE_FACTOR_DEFAULT),
+        origin="mutation",
+        department=parent.get("department"),
+        family_key=parent.get("family_key"))
     with conn:
         emit_event(conn, "agent.hired", {"agent_id": new_id, "name": name,
                                          "parent_agent_id": parent_agent_id,

@@ -4,6 +4,13 @@ Serves the mission-control UI's data needs and the demo controls:
 
     GET  /health                  liveness + target-system reachability
     GET  /state/agents            roster (incl. fired) with balances
+    GET  /agents                  same roster (incl. price_factor + origin)
+    GET  /agents/catalog          departments -> job families, model tiers
+                                  and the price bounds for the create form
+    POST /agents                  create an operator-designed agent
+                                  {name, department, job_family, model_tier,
+                                  price, charter_addendum?} — joins the roster
+                                  at once and bids on its family's jobs
     GET  /agents/{id}/harness     one agent's composed harness (charter,
                                   tools, playbooks, traits, lessons)
     GET  /state/jobs              jobs with bids + work orders embedded
@@ -153,6 +160,10 @@ def _conn():
     """Fresh connection with schema + roster guaranteed (read paths)."""
     conn = EDB.init_db()
     ECO.seed_roster(conn)
+    # Operator-created agents keep their harness only if their def is
+    # registered (orchestrator/harness.py); rebuild the registry from the
+    # agents table on every open so restarts lose nothing.
+    floor_engine.register_custom_agents(conn)
     return conn
 
 
@@ -417,6 +428,244 @@ def agent_harness(agent_id: int) -> dict:
             "lessons": {
                 "count": floor_harness.lesson_count(conn, agent_id),
                 "latest": latest,
+            },
+        }
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# Operator-created agents (POST /agents)
+#
+# The operator designs an agent: a name, a department + job family (its
+# beat), a model tier, and a price. The price is real: it lands on the
+# agent row as price_factor and scales the base term of
+# economy.suggest_bid (fraction = 0.55 * price_factor + 0.25 * risk +
+# salary pressure), so a cheaper agent visibly bids cheaper and wins more
+# work, a dearer one bids dearer. The agent is created through the same
+# economy.create_agent path as the seeded roster and mutated replacements,
+# starts at reputation 50 with a zero balance, and bids on its family's
+# jobs from the next cycle through the untouched economy path.
+# ---------------------------------------------------------------------------
+
+# Model tier -> the (model, tier, salary) the harness actually derives the
+# tier label from (orchestrator.harness.model_tier_for): economy = the
+# small model; premium = veteran tier / top salary; balanced = between.
+_AGENT_MODEL_TIERS: dict[str, dict] = {
+    "economy": {"model": "openai/gpt-oss-20b", "tier": "junior",
+                "base_salary_credits": 14,
+                "label": "Economy",
+                "blurb": "Small model, lowest running cost per cycle."},
+    "balanced": {"model": "openai/gpt-oss-120b", "tier": "senior",
+                 "base_salary_credits": 30,
+                 "label": "Balanced",
+                 "blurb": "Standard model, standard running cost per cycle."},
+    "premium": {"model": "openai/gpt-oss-120b", "tier": "veteran",
+                "base_salary_credits": 90,
+                "label": "Premium",
+                "blurb": "Top configuration, highest running cost per cycle."},
+}
+
+_PRICE_MIN = float(getattr(ECO, "PRICE_FACTOR_MIN", 0.5))
+_PRICE_MAX = float(getattr(ECO, "PRICE_FACTOR_MAX", 1.5))
+_PRICE_DEFAULT = float(getattr(ECO, "PRICE_FACTOR_DEFAULT", 1.0))
+_ADDENDUM_MAX_CHARS = 600
+_NAME_MAX_CHARS = 40
+
+
+def _families_by_department() -> dict[str, list]:
+    out: dict[str, list] = {}
+    for fam in floor_engine.JOB_FAMILIES:
+        out.setdefault(fam.department, []).append(fam)
+    return out
+
+
+def _agent_public(conn, agent: dict) -> dict:
+    row = conn.execute(
+        "SELECT balance_after FROM ledger WHERE agent_id = ? ORDER BY id DESC LIMIT 1",
+        (agent["id"],)).fetchone()
+    out = dict(agent)
+    out["balance_credits"] = row["balance_after"] if row else 0
+    return out
+
+
+@app.get("/agents")
+def agents_list() -> dict:
+    """The roster, same shape as /state/agents (price_factor + origin
+    included on every row)."""
+    conn = _conn()
+    try:
+        return {"agents": [_agent_public(conn, a)
+                           for a in ECO.list_agents(conn)]}
+    finally:
+        conn.close()
+
+
+@app.get("/agents/catalog")
+def agents_catalog() -> dict:
+    """Everything the create-agent form needs, from the real registries:
+    departments with their job families (engine.JOB_FAMILIES), the model
+    tiers the harness supports, and the price bounds suggest_bid honours."""
+    departments = []
+    for dept, fams in _families_by_department().items():
+        departments.append({
+            "key": dept,
+            "label": floor_departments.DEPT_LABELS.get(dept, dept),
+            "families": [{
+                "key": f.key,
+                "title": f.title,
+                "budget_credits": f.budget,
+                "server": f.server,
+                "tool_count": len(floor_tools.TOOL_SPECS.get(f.server, {})),
+            } for f in fams],
+        })
+    return {
+        "departments": departments,
+        "model_tiers": [{"key": k, "label": v["label"], "model": v["model"],
+                         "base_salary_credits": v["base_salary_credits"],
+                         "blurb": v["blurb"]}
+                        for k, v in _AGENT_MODEL_TIERS.items()],
+        "price": {
+            "min": _PRICE_MIN, "max": _PRICE_MAX, "default": _PRICE_DEFAULT,
+            "step": 0.05,
+            "meaning": ("Scales the base of the agent's bid price. 1.00 is a "
+                        "typical agent; lower bids cheaper and wins more "
+                        "work, higher bids dearer and earns more per job."),
+        },
+        "starting_reputation": 50.0,
+        "charter_addendum_max_chars": _ADDENDUM_MAX_CHARS,
+    }
+
+
+# Workplace (tool server) labels + the department each workplace belongs
+# to. StockRoom is a workplace of the Support department, not a hiring
+# department of its own — it is labelled as such in the catalogue.
+
+
+@app.post("/agents", status_code=201)
+async def agents_create(request: Request) -> dict:
+    """Create an operator-designed agent and put it on the roster.
+
+    Body: {name, department, job_family, model_tier, price,
+    charter_addendum?}. Validation: unknown department/family -> 422 with
+    the valid list; price outside [0.5, 1.5] -> 422; a name that duplicates
+    an existing agent (or an existing agent's base name — mutated
+    replacements are named '<base> <gen>.0', so base names are reserved)
+    -> 409; a name that itself looks like a generation name -> 422.
+    """
+    body = await _json_body(request)
+    conn = _conn()
+    try:
+        name = body.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise HTTPException(status_code=422,
+                                detail="name is required (a non-empty string)")
+        name = name.strip()
+        if len(name) > _NAME_MAX_CHARS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"name must be at most {_NAME_MAX_CHARS} characters")
+        if floor_harness.base_name(name) != name:
+            raise HTTPException(
+                status_code=422,
+                detail=("names ending in a version number are reserved for "
+                        "mutated replacements (e.g. 'Baron 2.0') — pick "
+                        "another name"))
+        existing = ECO.list_agents(conn)
+        for a in existing:
+            if (a["name"].lower() == name.lower()
+                    or floor_harness.base_name(a["name"]).lower() == name.lower()):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"an agent named '{a['name']}' already exists")
+
+        by_dept = _families_by_department()
+        department = body.get("department")
+        if department not in by_dept:
+            raise HTTPException(status_code=422, detail={
+                "error": f"unknown department {department!r}",
+                "valid_departments": [
+                    {"key": d, "label": floor_departments.DEPT_LABELS.get(d, d)}
+                    for d in by_dept],
+            })
+        families = {f.key: f for f in by_dept[department]}
+        job_family = body.get("job_family")
+        if job_family not in families:
+            raise HTTPException(status_code=422, detail={
+                "error": f"unknown job_family {job_family!r} for department "
+                         f"{department!r}",
+                "valid_job_families": [
+                    {"key": f.key, "title": f.title} for f in families.values()],
+            })
+        family = families[job_family]
+
+        model_tier = body.get("model_tier")
+        if model_tier not in _AGENT_MODEL_TIERS:
+            raise HTTPException(status_code=422, detail={
+                "error": f"unknown model_tier {model_tier!r}",
+                "valid_model_tiers": list(_AGENT_MODEL_TIERS),
+            })
+        tier_cfg = _AGENT_MODEL_TIERS[model_tier]
+
+        price = body.get("price", _PRICE_DEFAULT)
+        if isinstance(price, bool) or not isinstance(price, (int, float)):
+            raise HTTPException(status_code=422,
+                                detail="price must be a number")
+        price = float(price)
+        if not (_PRICE_MIN <= price <= _PRICE_MAX):
+            raise HTTPException(status_code=422, detail={
+                "error": f"price {price} is outside the allowed range",
+                "price_min": _PRICE_MIN, "price_max": _PRICE_MAX,
+            })
+
+        addendum = body.get("charter_addendum") or ""
+        if not isinstance(addendum, str):
+            raise HTTPException(status_code=422,
+                                detail="charter_addendum must be a string")
+        addendum = addendum.strip()
+        if len(addendum) > _ADDENDUM_MAX_CHARS:
+            raise HTTPException(
+                status_code=422,
+                detail=f"charter_addendum must be at most "
+                       f"{_ADDENDUM_MAX_CHARS} characters")
+
+        dept_label = floor_departments.DEPT_LABELS.get(department, department)
+        persona = (
+            f"Custom {dept_label} worker created by the floor operator. "
+            f"Beat: the '{family.title}' job family ({family.key}) on the "
+            f"{dept_label} desk — bids only on those jobs and works them "
+            f"with that desk's tools.")
+        if addendum:
+            persona += f" Operator's extra instructions: {addendum}"
+
+        hired_cycle = conn.execute(
+            "SELECT COALESCE(MAX(cycle_no), 0) AS n FROM payroll_cycles"
+        ).fetchone()["n"]
+        agent_id = ECO.create_agent(
+            conn, name, role="worker", persona_prompt=persona,
+            model=tier_cfg["model"], tier=tier_cfg["tier"],
+            base_salary_credits=tier_cfg["base_salary_credits"],
+            risk_appetite=0.5, reputation=50.0,
+            price_factor=price, origin="user-created",
+            department=department, family_key=job_family,
+            hired_cycle=int(hired_cycle))
+        floor_engine.register_custom_agents(conn)
+        agent = ECO.get_agent(conn, agent_id)
+        with conn:
+            EDB.emit_event(conn, "agent.created", {
+                "agent_id": agent_id, "name": name, "origin": "user-created",
+                "department": department, "family_key": job_family,
+                "model_tier": model_tier, "price_factor": price})
+        conn.commit()
+        h = floor_harness.harness_for(agent)
+        return {
+            "agent": _agent_public(conn, agent),
+            "harness": {
+                "department": h.department,
+                "role_label": h.role_label,
+                "model_tier": h.model_tier,
+                "tool_count": len(h.tools),
+                "charter_summary": h.charter.split("\n")[0],
             },
         }
     finally:

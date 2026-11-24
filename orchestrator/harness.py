@@ -425,15 +425,57 @@ class Harness:
                       if TOOL_SPECS[s][t]["effect"] == "write")
 
 
+# ---------------------------------------------------------------------------
+# Operator-created agents (POST /agents). A custom agent is NOT one of the
+# seeded personas: its def is built from the job family it was created for —
+# charter = the family's role template (the persona text on its agent row
+# carries the template + the operator's addendum), tool allowlist = that
+# family's tool server only, playbook = the family's recipe. Defs live in
+# this registry, keyed by base name; the engine and the API rebuild the
+# registry from the agents table (rows with family_key set) whenever they
+# open the floor DB, so a created agent keeps its harness across restarts.
+# ---------------------------------------------------------------------------
+
+_CUSTOM_DEFS: dict[str, dict[str, Any]] = {}
+
+
+def register_custom_agent(name: str, *, role_label: str, department: str,
+                          family_key: str, server: str) -> None:
+    """Register (or refresh) the harness def for an operator-created agent."""
+    _CUSTOM_DEFS[base_name(name)] = {
+        "role": "worker", "role_label": role_label, "department": department,
+        "traits": {},
+        "rules": _COMMON_WORKER_RULES + [
+            f"Your beat is one job family: '{family_key}'. You bid only on "
+            f"those jobs and work only with the {server} desk's tools.",
+        ],
+        "overlay": [],
+        "settings": {"temperature": 0.5, "verification": "standard",
+                     "max_retries": 1, "verification_strictness": "standard"},
+        "write_exclusions": frozenset(),
+        "tools": _tool_set((server,)),
+        "family_key": family_key,
+        "server": server,
+    }
+
+
+def is_custom_agent(name: str) -> bool:
+    return base_name(name) in _CUSTOM_DEFS
+
+
 def _persona_def(base: str) -> dict[str, Any]:
-    return _PERSONAS.get(base, {
+    if base in _PERSONAS:
+        return _PERSONAS[base]
+    if base in _CUSTOM_DEFS:
+        return _CUSTOM_DEFS[base]
+    return {
         "role": "worker", "role_label": "Floor worker", "department": "support",
         "traits": {},
         "rules": list(_DEFAULT_RULES), "overlay": [],
         "settings": {"temperature": 0.5, "verification": "standard",
                      "max_retries": 1, "verification_strictness": "standard"},
         "write_exclusions": frozenset(),
-    })
+    }
 
 
 MODEL_TIERS = ("economy", "balanced", "premium")
@@ -526,7 +568,7 @@ def allowlist_for_name(name: str) -> Optional[frozenset]:
     callers). 'manager' is the floor manager: unrestricted."""
     if name == "manager":
         return _MANAGER_TOOLS
-    d = _PERSONAS.get(base_name(name))
+    d = _PERSONAS.get(base_name(name)) or _CUSTOM_DEFS.get(base_name(name))
     if d is None:
         return None
     return _tool_set_for_def(d)
