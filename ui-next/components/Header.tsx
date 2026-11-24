@@ -14,6 +14,9 @@ export interface HeaderStats {
   activeAgents: number;
 }
 
+/* Slim topbar in the AO shell sense: brand and orientation on the left,
+   a compact run of shift totals in the middle, and the two shift
+   actions on the right. Nothing here duplicates the center surface. */
 export default function Header({
   stats,
   connected,
@@ -33,8 +36,8 @@ export default function Header({
         <h1 className="logo">THE FLOOR</h1>
         <p className="tagline">Every agent has a price. Every price has a consequence.</p>
       </div>
-      <dl className="stats" aria-label="Factory totals">
-        <div className="stat">
+      <dl className="stats" aria-label="Shift totals">
+        <div className="stat hideable">
           <dt className="stat-label">Cycle</dt>
           <dd className="stat-value">{stats.cycle === null ? "—" : stats.cycle}</dd>
         </div>
@@ -50,13 +53,13 @@ export default function Header({
             <CountUp value={stats.done} format={fmtInt} />
           </dd>
         </div>
-        <div className="stat">
+        <div className="stat hideable">
           <dt className="stat-label">Jobs failed</dt>
           <dd className="stat-value">
             <CountUp value={stats.failed} format={fmtInt} />
           </dd>
         </div>
-        <div className="stat">
+        <div className="stat hideable">
           <dt className="stat-label">Active agents</dt>
           <dd className="stat-value">
             <CountUp value={stats.activeAgents} format={fmtInt} />
@@ -65,16 +68,16 @@ export default function Header({
         <div className="stat">
           <dt className="stat-label">Connection</dt>
           <dd className={`stat-value conn${connected ? " ok" : ""}`}>
-            {connected ? "live" : "offline — retrying"}
+            {connected ? "Live" : "Offline — retrying"}
           </dd>
         </div>
       </dl>
       <div className="actions">
         <button type="button" className="btn btn-primary" onClick={onRun} disabled={running}>
-          {running ? "Shift running…" : "Run Shift"}
+          {running ? "Shift running…" : "Run shift"}
         </button>
         <button type="button" className="btn btn-ghost" onClick={onReset}>
-          Reset Demo
+          Reset demo
         </button>
       </div>
     </header>

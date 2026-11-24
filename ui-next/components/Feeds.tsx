@@ -26,6 +26,8 @@ export function LedgerFeed({ rows }: { rows: LedgerRow[] }) {
   );
 }
 
+/* Bottom strip of the center surface: ledger and narration side by
+   side, each scrolling on its own so the board above never moves. */
 export default function Feeds({
   ledger,
   narration,
@@ -36,28 +38,32 @@ export default function Feeds({
   extraLedgerItems: React.ReactNode;
 }) {
   return (
-    <aside className="panel fx-entrance" aria-labelledby="ledger-title">
-      <h2 className="panel-title" id="ledger-title">
-        Ledger
-      </h2>
-      <div className="feed ledger-feed" aria-label="Credit movements">
-        {extraLedgerItems}
-        <LedgerFeed rows={ledger} />
+    <section className="feeds-strip fx-entrance" aria-label="Ledger and narration">
+      <div className="panel">
+        <h2 className="panel-title" id="ledger-title">
+          Ledger
+        </h2>
+        <div className="feed ledger-feed" aria-label="Credit movements">
+          {extraLedgerItems}
+          <LedgerFeed rows={ledger} />
+        </div>
       </div>
-      <h2 className="panel-title" id="narration-title">
-        Narration
-      </h2>
-      <div className="feed narration-log" role="log" aria-labelledby="narration-title">
-        {narration.length ? (
-          narration.map((n) => (
-            <div className={`feed-item${n.cls ? ` ${n.cls}` : ""}`} key={n.key}>
-              {n.text}
-            </div>
-          ))
-        ) : (
-          <span className="empty">The floor is quiet.</span>
-        )}
+      <div className="panel">
+        <h2 className="panel-title" id="narration-title">
+          Narration
+        </h2>
+        <div className="feed narration-log" role="log" aria-labelledby="narration-title">
+          {narration.length ? (
+            narration.map((n) => (
+              <div className={`feed-item${n.cls ? ` ${n.cls}` : ""}`} key={n.key}>
+                {n.text}
+              </div>
+            ))
+          ) : (
+            <span className="empty">The floor is quiet.</span>
+          )}
+        </div>
       </div>
-    </aside>
+    </section>
   );
 }
