@@ -1,0 +1,38 @@
+[
+  {
+    "falsifier": "Verified mean validation F1 does not exceed the stated baseline.",
+    "family": "random_forest",
+    "id": "H1",
+    "params": {
+      "class_weight": "balanced",
+      "max_depth": null,
+      "n_estimators": 400
+    },
+    "statement": "A larger random forest with balanced class weights beats the default-config forest on attack detection."
+  },
+  {
+    "falsifier": "Verified mean validation F1 does not exceed the stated baseline.",
+    "family": "gradient_boosting",
+    "id": "H2",
+    "params": {
+      "learning_rate": 0.08,
+      "max_depth": null,
+      "max_iter": 300
+    },
+    "statement": "Histogram gradient boosting (300 rounds, lr 0.08) beats the stated baseline by fitting attack boundaries the forest smooths over."
+  },
+  {
+    "falsifier": "Verified mean validation F1 does not exceed the stated baseline.",
+    "family": "mlp",
+    "id": "H3",
+    "params": {
+      "alpha": 0.001,
+      "hidden": [
+        128,
+        64
+      ],
+      "max_iter": 300
+    },
+    "statement": "A small MLP (128-64) on standardised features beats the stated baseline by learning feature interactions trees miss."
+  }
+]

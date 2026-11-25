@@ -2,3 +2,6 @@ fastapi
 uvicorn
 httpx
 mcp
+# ML Factory (ml_factory/) campaign dependencies
+scikit-learn
+pandas

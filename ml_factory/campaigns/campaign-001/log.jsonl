@@ -1,0 +1,47 @@
+{"dataset_source": "CICIDS2017 sample (Kaggle: sweety18/cicids2017-full-dataset), prepared by ml_factory/prepare_cicids.py", "event": "campaign.opened", "goal": "binary classification: attack (1) vs BENIGN (0)", "ts": 1795593814.592}
+{"dataset_source": "CICIDS2017 sample (Kaggle: sweety18/cicids2017-full-dataset), prepared by ml_factory/prepare_cicids.py", "duplicates_removed": 5451, "event": "data.frozen", "split_hash": "7572572fa0b8976343626ec465efc4824a68f553e306a1377c165b91b1b75f90", "split_sizes": {"holdout": 2910, "train": 8729, "validation": 2910}, "ts": 1795593814.657}
+{"dumb_baseline_f1": 0.0, "event": "baseline.scored", "scored_by": "evaluation", "stated_baseline_f1": 0.991588, "ts": 1795593816.407}
+{"baseline_f1": 0.991588, "campaign_budget": 600.0, "event": "charter.frozen", "per_experiment_cap": 120.0, "ts": 1795593816.408}
+{"event": "hypothesis.registered", "falsifier": "Verified mean validation F1 does not exceed the stated baseline.", "family": "random_forest", "hypothesis_id": "H1", "statement": "A larger random forest with balanced class weights beats the default-config forest on attack detection.", "ts": 1795593816.408}
+{"event": "hypothesis.registered", "falsifier": "Verified mean validation F1 does not exceed the stated baseline.", "family": "gradient_boosting", "hypothesis_id": "H2", "statement": "Histogram gradient boosting (300 rounds, lr 0.08) beats the stated baseline by fitting attack boundaries the forest smooths over.", "ts": 1795593816.408}
+{"event": "hypothesis.registered", "falsifier": "Verified mean validation F1 does not exceed the stated baseline.", "family": "mlp", "hypothesis_id": "H3", "statement": "A small MLP (128-64) on standardised features beats the stated baseline by learning feature interactions trees miss.", "ts": 1795593816.408}
+{"cap": 120.0, "event": "job.posted", "family": "random_forest", "job_id": "job_H1", "ts": 1795593816.408}
+{"agent_id": "agent_forester", "compute_estimate": 36.0, "confidence": 0.85, "event": "bid.placed", "fee": 26.4, "job_id": "job_H1", "price": 62.4, "score": 0.56, "ts": 1795593816.408}
+{"agent_id": "agent_booster", "compute_estimate": 50.4, "confidence": 0.45, "event": "bid.placed", "fee": 45.6, "job_id": "job_H1", "price": 96.0, "score": 0.34, "ts": 1795593816.408}
+{"agent_id": "agent_weaver", "compute_estimate": 50.4, "confidence": 0.45, "event": "bid.placed", "fee": 45.6, "job_id": "job_H1", "price": 96.0, "score": 0.34, "ts": 1795593816.408}
+{"agent_id": "agent_forester", "event": "job.awarded", "job_id": "job_H1", "price": 62.4, "score": 0.56, "ts": 1795593816.408}
+{"event": "run.completed", "job_id": "job_H1", "ok": true, "seed": 42, "self_reported_f1": 0.9931830099632931, "ts": 1795593824.604, "wall_s": 8.195}
+{"event": "run.completed", "job_id": "job_H1", "ok": true, "seed": 43, "self_reported_f1": 0.9921259842519685, "ts": 1795593832.23, "wall_s": 7.626}
+{"event": "run.completed", "job_id": "job_H1", "ok": true, "seed": 44, "self_reported_f1": 0.993704092339979, "ts": 1795593839.679, "wall_s": 7.449}
+{"credits": 0.3878, "event": "compute.charged", "job_id": "job_H1", "ts": 1795593839.679, "wall_s": 23.27}
+{"accepted": true, "event": "evaluation.verdict", "failures": [], "job_id": "job_H1", "kept": true, "ts": 1795593840.015, "verified_mean_f1": 0.993004}
+{"event": "ratchet.kept", "hypothesis_id": "H1", "ts": 1795593840.015, "verified_mean_f1": 0.993004}
+{"agent_id": "agent_forester", "event": "payment.made", "fee": 26.4, "job_id": "job_H1", "reason": "verified improvement accepted", "ts": 1795593840.015}
+{"cap": 120.0, "event": "job.posted", "family": "gradient_boosting", "job_id": "job_H2", "ts": 1795593840.015}
+{"agent_id": "agent_forester", "compute_estimate": 50.4, "confidence": 0.45, "event": "bid.placed", "fee": 45.6, "job_id": "job_H2", "price": 96.0, "score": 0.358, "ts": 1795593840.015}
+{"agent_id": "agent_booster", "compute_estimate": 36.0, "confidence": 0.85, "event": "bid.placed", "fee": 26.4, "job_id": "job_H2", "price": 62.4, "score": 0.56, "ts": 1795593840.016}
+{"agent_id": "agent_weaver", "compute_estimate": 50.4, "confidence": 0.45, "event": "bid.placed", "fee": 45.6, "job_id": "job_H2", "price": 96.0, "score": 0.34, "ts": 1795593840.016}
+{"agent_id": "agent_booster", "event": "job.awarded", "job_id": "job_H2", "price": 62.4, "score": 0.56, "ts": 1795593840.016}
+{"event": "run.completed", "job_id": "job_H2", "ok": true, "seed": 42, "self_reported_f1": 0.99581589958159, "ts": 1795593847.841, "wall_s": 7.825}
+{"event": "run.completed", "job_id": "job_H2", "ok": true, "seed": 43, "self_reported_f1": 0.99581589958159, "ts": 1795593863.782, "wall_s": 15.94}
+{"event": "run.completed", "job_id": "job_H2", "ok": true, "seed": 44, "self_reported_f1": 0.99581589958159, "ts": 1795593873.178, "wall_s": 9.396}
+{"credits": 0.5527, "event": "compute.charged", "job_id": "job_H2", "ts": 1795593873.179, "wall_s": 33.161}
+{"accepted": true, "event": "evaluation.verdict", "failures": [], "job_id": "job_H2", "kept": true, "ts": 1795593873.552, "verified_mean_f1": 0.995816}
+{"event": "ratchet.kept", "hypothesis_id": "H2", "ts": 1795593873.552, "verified_mean_f1": 0.995816}
+{"agent_id": "agent_booster", "event": "payment.made", "fee": 26.4, "job_id": "job_H2", "reason": "verified improvement accepted", "ts": 1795593873.552}
+{"cap": 120.0, "event": "job.posted", "family": "mlp", "job_id": "job_H3", "ts": 1795593873.552}
+{"agent_id": "agent_forester", "compute_estimate": 50.4, "confidence": 0.45, "event": "bid.placed", "fee": 45.6, "job_id": "job_H3", "price": 96.0, "score": 0.358, "ts": 1795593873.553}
+{"agent_id": "agent_booster", "compute_estimate": 50.4, "confidence": 0.45, "event": "bid.placed", "fee": 45.6, "job_id": "job_H3", "price": 96.0, "score": 0.358, "ts": 1795593873.553}
+{"agent_id": "agent_weaver", "compute_estimate": 36.0, "confidence": 0.85, "event": "bid.placed", "fee": 26.4, "job_id": "job_H3", "price": 62.4, "score": 0.56, "ts": 1795593873.553}
+{"agent_id": "agent_weaver", "event": "job.awarded", "job_id": "job_H3", "price": 62.4, "score": 0.56, "ts": 1795593873.553}
+{"event": "run.completed", "job_id": "job_H3", "ok": true, "seed": 42, "self_reported_f1": 0.9915966386554622, "ts": 1795593892.829, "wall_s": 19.276}
+{"event": "run.completed", "job_id": "job_H3", "ok": true, "seed": 43, "self_reported_f1": 0.9910761154855643, "ts": 1795593913.159, "wall_s": 20.33}
+{"event": "run.completed", "job_id": "job_H3", "ok": true, "seed": 44, "self_reported_f1": 0.9916054564533053, "ts": 1795593931.285, "wall_s": 18.125}
+{"credits": 0.9622, "event": "compute.charged", "job_id": "job_H3", "ts": 1795593931.292, "wall_s": 57.731}
+{"accepted": true, "event": "evaluation.verdict", "failures": [], "job_id": "job_H3", "kept": false, "ts": 1795593931.637, "verified_mean_f1": 0.991426}
+{"event": "ratchet.discarded", "hypothesis_id": "H3", "reason": "verified mean F1 0.9914 did not beat the incumbent 0.9958", "ts": 1795593931.638}
+{"agent_id": "agent_weaver", "event": "lesson.written", "lesson": "mlp hypothesis H3 discarded \u2014 verified mean F1 0.9914 did not beat the incumbent 0.9958. Pre-registered falsifier: Verified mean validation F1 does not exceed the stated baseline.", "ts": 1795593931.638}
+{"event": "holdout.hygiene_checked", "ts": 1795593931.656, "untouched_before_close": true}
+{"event": "campaign.closing", "incumbent": "H2", "ts": 1795593931.656}
+{"event": "holdout.scored", "holdout_f1": 0.996862, "scored_by": "evaluation", "ts": 1795593944.655}
+{"event": "campaign.closed", "holdout_f1": 0.996862, "total_spent_credits": 54.7027, "ts": 1795593944.655}
