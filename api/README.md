@@ -26,6 +26,11 @@ Headless alternative (no API): `python -m orchestrator.engine --cycles 2 --reset
 |---|---|
 | `GET /health` | status, agent count, last event seq, TicketDesk/StockRoom reachability |
 | `GET /state/agents` | roster incl. fired agents, reputation, ledger balance |
+| `GET /agents` | same roster, with `price_factor` + `origin` on every row |
+| `GET /agents/catalog` | departments → job families, model tiers and price bounds for the create-agent form |
+| `POST /agents` | create an operator-designed agent `{name, department, job_family, model_tier, price, charter_addendum?}` — joins the roster at reputation 50 and bids on its family's jobs; `price` is stored as `price_factor` and scales `suggest_bid` |
+| `GET /agents/{id}/harness` | one agent's composed harness (charter, tools, playbooks, traits, lessons) |
+| `GET /agents/{id}/harness/export` | the full profile bundle (H6): charter document, toolsets, playbook SKILL.md refs, complete lessons memory, lineage + diff vs parent |
 | `GET /state/jobs` | jobs with acceptance criteria, bids, work orders |
 | `GET /state/ledger?limit=100` | append-only ledger, newest first |
 | `GET /state/events?after_seq=&limit=` | stored events (polling fallback) |

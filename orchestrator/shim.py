@@ -40,7 +40,9 @@ CREATE TABLE IF NOT EXISTS agents (
     base_salary_credits INTEGER NOT NULL DEFAULT 0, risk_appetite REAL NOT NULL DEFAULT 0.5,
     status TEXT NOT NULL DEFAULT 'active', parent_agent_id INTEGER, generation INTEGER NOT NULL DEFAULT 1,
     mutation_note TEXT, reputation REAL NOT NULL DEFAULT 50.0, hired_cycle INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL, fired_at TEXT, fire_reason TEXT);
+    created_at TEXT NOT NULL, fired_at TEXT, fire_reason TEXT,
+    price_factor REAL NOT NULL DEFAULT 1.0, origin TEXT NOT NULL DEFAULT 'seeded',
+    department TEXT, family_key TEXT);
 CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT, system_id INTEGER, source TEXT NOT NULL DEFAULT 'seeded',
     title TEXT NOT NULL, brief TEXT NOT NULL DEFAULT '', acceptance_criteria TEXT NOT NULL DEFAULT '[]',
@@ -120,6 +122,15 @@ def init_db(db_path=None, reset: bool = False) -> sqlite3.Connection:
     conn = get_conn(path)
     conn.executescript(SCHEMA)
     conn.commit()
+    # Migrate agents columns added for operator-created agents (mirrors
+    # economy.db._migrate_agent_columns).
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(agents)")}
+    for col, decl in {"price_factor": "REAL NOT NULL DEFAULT 1.0",
+                      "origin": "TEXT NOT NULL DEFAULT 'seeded'",
+                      "department": "TEXT", "family_key": "TEXT"}.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE agents ADD COLUMN {col} {decl}")
+    conn.commit()
     return conn
 
 
@@ -155,17 +166,20 @@ _ROSTER = [
 
 def create_agent(conn, name, *, role="worker", persona_prompt="", model="openai/gpt-oss-120b",
                  tier="junior", base_salary_credits=0, risk_appetite=0.5, reputation=50.0,
-                 parent_agent_id=None, generation=1, mutation_note=None, hired_cycle=0) -> int:
+                 parent_agent_id=None, generation=1, mutation_note=None, hired_cycle=0,
+                 price_factor=1.0, origin="seeded", department=None, family_key=None) -> int:
     reputation = max(0.0, min(100.0, float(reputation)))
+    price_factor = max(0.5, min(1.5, float(price_factor)))
     with conn:
         cur = conn.execute(
             """INSERT INTO agents (name, role, persona_prompt, model, tier, base_salary_credits,
                    risk_appetite, status, parent_agent_id, generation, mutation_note, reputation,
-                   hired_cycle, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)""",
+                   hired_cycle, created_at, price_factor, origin, department, family_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, role, persona_prompt, model, tier, int(base_salary_credits),
              float(risk_appetite), parent_agent_id, int(generation), mutation_note,
-             reputation, int(hired_cycle), now_iso()),
+             reputation, int(hired_cycle), now_iso(),
+             price_factor, origin, department, family_key),
         )
         agent_id = cur.lastrowid
         if reputation != 0.0:
@@ -274,12 +288,14 @@ def suggest_bid(conn, agent_id, job_id):
         raise ValueError("agent or job not found")
     cap = job["budget_credits"]
     salary_pressure = min(agent["base_salary_credits"] / max(cap, 1), 0.45)
-    fraction = 0.55 + 0.25 * agent["risk_appetite"] + salary_pressure
+    price_factor = float(agent.get("price_factor") or 1.0)
+    fraction = 0.55 * price_factor + 0.25 * agent["risk_appetite"] + salary_pressure
     price = max(1, min(cap, round(cap * fraction)))
     confidence = round(max(0.05, min(0.99, agent["reputation"] / 100.0
                                      + 0.1 * (agent["risk_appetite"] - 0.5))), 2)
     rationale = (f"{agent['name']}: price {price}/{cap} from salary pressure "
-                 f"{salary_pressure:.2f} + risk {agent['risk_appetite']:.2f}")
+                 f"{salary_pressure:.2f} + risk {agent['risk_appetite']:.2f}; "
+                 f"price factor {price_factor:.2f}")
     return price, confidence, rationale
 
 
@@ -544,7 +560,11 @@ def hire_mutated_replacement(conn, parent_agent_id, cycle_no) -> int:
     new_id = create_agent(conn, name, role=parent["role"], persona_prompt=persona, model=model,
                           tier=parent["tier"], base_salary_credits=parent["base_salary_credits"],
                           risk_appetite=risk, reputation=50.0, parent_agent_id=parent_agent_id,
-                          generation=generation, mutation_note=note, hired_cycle=cycle_no)
+                          generation=generation, mutation_note=note, hired_cycle=cycle_no,
+                          price_factor=float(parent.get("price_factor") or 1.0),
+                          origin="mutation",
+                          department=parent.get("department"),
+                          family_key=parent.get("family_key"))
     with conn:
         emit_event(conn, "agent.hired", {"agent_id": new_id, "name": name,
                                          "parent_agent_id": parent_agent_id,

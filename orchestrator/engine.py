@@ -186,6 +186,33 @@ DEPT_LABELS = _departments.DEPT_LABELS
 
 FAMILIES_BY_KEY = {f.key: f for f in JOB_FAMILIES}
 
+
+def register_custom_agents(conn) -> int:
+    """(Re)build the harness registry for operator-created agents.
+
+    Any agent row carrying a family_key is an operator-created specialist
+    (POST /agents): its harness def comes from that family — charter
+    template, the family's tool-server allowlist, the family's playbook.
+    Called whenever the floor DB is opened (engine + API), so a created
+    agent keeps its harness across process restarts. Returns the count
+    registered.
+    """
+    count = 0
+    for a in ECO.list_agents(conn):
+        fam_key = a.get("family_key")
+        if not fam_key:
+            continue
+        fam = FAMILIES_BY_KEY.get(fam_key)
+        if fam is None:
+            continue
+        _harness.register_custom_agent(
+            a["name"],
+            role_label=(f"Custom {DEPT_LABELS.get(fam.department, fam.department)} "
+                        f"worker — {fam.title}"),
+            department=fam.department, family_key=fam.key, server=fam.server)
+        count += 1
+    return count
+
 # Persona traits keyed by agent name (roster from economy.core._ROSTER).
 # The harness module is the source of truth now (orchestrator/harness.py);
 # the values are identical to the former literal table. Generic fallbacks
@@ -235,6 +262,7 @@ class FloorEngine:
             self.conn = EDB.init_db(self.db_path)
             ECO.seed_roster(self.conn)
             _harness.init_lessons(self.conn)
+            register_custom_agents(self.conn)
         return self.conn
 
     def _emit(self, type_: str, payload: dict) -> None:
@@ -287,6 +315,27 @@ class FloorEngine:
         """
         conn = self._open()
         args = dict(args or {})
+        # H3 hardline (orchestrator/harness.py DENY_ALWAYS, research
+        # §6.3): human-only powers are denied HERE — before the tool's
+        # effect is even looked up (a denied name may not exist in the
+        # specs at all), before the harness allowlist, and before the
+        # confirmation gate. No trust mode overrides it: hardline beats
+        # Auto, and it binds the manager persona too. Hermes' rule,
+        # verbatim in spirit: the hardline blocklist has no override.
+        denial = _harness.hardline_denial(server, tool_name)
+        if denial is not None:
+            if wo_id is not None:
+                ECO.record_tool_call(conn, wo_id, tool_name, args=args,
+                                     effect="write", status="denied",
+                                     result_summary=f"denied (hardline) — {denial}")
+            self._emit("harness.denied_hardline", {
+                "work_order_id": wo_id, "tool_name": tool_name,
+                "server": server, "worker": worker_name, "reason": denial})
+            self._emit("tool.executed", {
+                "work_order_id": wo_id, "tool_name": tool_name, "args": args,
+                "effect": "write", "status": "denied", "worker": worker_name,
+                "reason": "harness_hardline"})
+            raise PermissionError(f"{tool_name} denied (hardline): {denial}")
         effect = self.tools.effect(server, tool_name)
         # Harness allowlist (orchestrator/harness.py): a known persona may
         # only call tools in its own harness. The denial is recorded and
@@ -587,6 +636,12 @@ class FloorEngine:
 
         workers = [a for a in ECO.list_agents(conn, status="active") if a["role"] == "worker"]
         for worker in workers:
+            # Operator-created specialists (family_key set on the row) bid
+            # only on their own job family; seeded/mutated generalists bid
+            # on everything, exactly as before.
+            worker_family = worker.get("family_key")
+            if worker_family and worker_family != family.key:
+                continue
             price, conf, rationale = self.persona_bid(worker, job, family.key)
             ECO.place_bid(conn, job_id, worker["id"], price, conf, rationale)
         wo_id = ECO.award_job(conn, job_id)

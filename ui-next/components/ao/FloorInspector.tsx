@@ -20,8 +20,9 @@ import {
   type InspectorTab,
   type InspectorView,
 } from "../../vendor/ao/product-ui";
-import { FileTextIcon, GitPullRequestIcon, MessageSquareIcon, XIcon } from "../../vendor/ao/product-ui/icons";
+import { FileTextIcon, GitBranchIcon, GitPullRequestIcon, MessageSquareIcon, XIcon } from "../../vendor/ao/product-ui/icons";
 import { credits, pick } from "../../lib/api";
+import JobTrace from "../JobTrace";
 import type { Agent, Job, Presence } from "../../lib/types";
 import { agentTimeline, jobReviewGroups, jobTimeline, presenceLabel, type FloorEventLogItem } from "./adapter";
 
@@ -236,6 +237,7 @@ export default function FloorInspector({
     ? [
         { id: "summary", label: "Summary", icon: <FileTextIcon className="size-icon-sm" /> },
         { id: "reviews", label: "Reviews", icon: <GitPullRequestIcon className="size-icon-sm" /> },
+        { id: "files", label: "Trace", icon: <GitBranchIcon className="size-icon-sm" /> },
         { id: "artifacts", label: "Activity", icon: <MessageSquareIcon className="size-icon-sm" /> },
       ]
     : [
@@ -283,6 +285,13 @@ export default function FloorInspector({
                 renderAvatar={(harness) => <AgentAvatar provider={harness} />}
                 renderMarkdown={(body) => <span className="whitespace-pre-wrap">{body}</span>}
               />
+            ) : undefined
+          }
+          filesView={
+            job ? (
+              <div className="px-3 py-2">
+                <JobTrace job={job} />
+              </div>
             ) : undefined
           }
           artifactsView={
