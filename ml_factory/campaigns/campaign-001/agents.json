@@ -1,0 +1,34 @@
+[
+  {
+    "earnings": 26.4,
+    "id": "agent_forester",
+    "jobs_kept": 1,
+    "jobs_won": 1,
+    "lessons": [],
+    "name": "Forester",
+    "reputation": 56.0,
+    "speciality": "random_forest"
+  },
+  {
+    "earnings": 26.4,
+    "id": "agent_booster",
+    "jobs_kept": 1,
+    "jobs_won": 1,
+    "lessons": [],
+    "name": "Booster",
+    "reputation": 56.0,
+    "speciality": "gradient_boosting"
+  },
+  {
+    "earnings": 0.0,
+    "id": "agent_weaver",
+    "jobs_kept": 0,
+    "jobs_won": 1,
+    "lessons": [
+      "mlp hypothesis H3 discarded \u2014 verified mean F1 0.9914 did not beat the incumbent 0.9958. Pre-registered falsifier: Verified mean validation F1 does not exceed the stated baseline."
+    ],
+    "name": "Weaver",
+    "reputation": 51.0,
+    "speciality": "mlp"
+  }
+]

@@ -1,0 +1,315 @@
+{
+  "agents": [
+    {
+      "earnings": 26.4,
+      "id": "agent_forester",
+      "jobs_kept": 1,
+      "jobs_won": 1,
+      "lessons": [],
+      "name": "Forester",
+      "reputation": 56.0,
+      "speciality": "random_forest"
+    },
+    {
+      "earnings": 26.4,
+      "id": "agent_booster",
+      "jobs_kept": 1,
+      "jobs_won": 1,
+      "lessons": [],
+      "name": "Booster",
+      "reputation": 56.0,
+      "speciality": "gradient_boosting"
+    },
+    {
+      "earnings": 0.0,
+      "id": "agent_weaver",
+      "jobs_kept": 0,
+      "jobs_won": 1,
+      "lessons": [
+        "mlp hypothesis H3 discarded \u2014 verified mean F1 0.9914 did not beat the incumbent 0.9958. Pre-registered falsifier: Verified mean validation F1 does not exceed the stated baseline."
+      ],
+      "name": "Weaver",
+      "reputation": 51.0,
+      "speciality": "mlp"
+    }
+  ],
+  "charter": {
+    "campaign_budget_credits": 600.0,
+    "campaign_id": "campaign-001",
+    "dataset": {
+      "features": 67,
+      "positive_rate": 0.5,
+      "rows": 20000,
+      "source": "CICIDS2017 sample (Kaggle: sweety18/cicids2017-full-dataset), prepared by ml_factory/prepare_cicids.py",
+      "task": "binary classification: attack (1) vs BENIGN (0)"
+    },
+    "dumb_baseline_f1": 0.0,
+    "duplicates_removed_at_freeze": 5451,
+    "goal": "binary classification: attack (1) vs BENIGN (0)",
+    "holdout_policy": "holdout is not mounted in any experiment; scored exactly once, by Evaluation, at campaign close",
+    "leakage_auc_threshold": 0.98,
+    "metric": {
+      "definition": "binary F1 on the positive class, recomputed by Evaluation from raw predictions; campaign metric is the mean over >= 3 seeds",
+      "direction": "higher_is_better",
+      "name": "f1"
+    },
+    "per_experiment_cap_credits": 120.0,
+    "rate_card": {
+      "cpu_credit_per_minute": 1.0,
+      "note": "local CPU sandbox, priced nominally so compute burn is visible in the same units as wages"
+    },
+    "signed_by": "human (charter layer)",
+    "split_hash": "7572572fa0b8976343626ec465efc4824a68f553e306a1377c165b91b1b75f90",
+    "stated_baseline": {
+      "description": "default-config random forest (scikit-learn defaults)",
+      "family": "random_forest",
+      "params": {
+        "class_weight": null,
+        "max_depth": null,
+        "n_estimators": 100
+      },
+      "verified_validation_f1": 0.991588
+    }
+  },
+  "finished_at": 1795593944.656,
+  "holdout": {
+    "holdout_f1": 0.996862
+  },
+  "holdout_untouched_before_close": true,
+  "incumbent": {
+    "hypothesis_id": "H2",
+    "script": "ml_factory/campaigns/campaign-001/experiments/H2/train.py",
+    "verified_mean_f1": 0.995816
+  },
+  "results": [
+    {
+      "agent_id": "agent_forester",
+      "bid": {
+        "agent_id": "agent_forester",
+        "compute_estimate": 36.0,
+        "confidence": 0.85,
+        "fee": 26.4,
+        "price": 62.4,
+        "score": 0.56
+      },
+      "compute_credits": 0.3878,
+      "hypothesis": {
+        "falsifier": "Verified mean validation F1 does not exceed the stated baseline.",
+        "family": "random_forest",
+        "id": "H1",
+        "params": {
+          "class_weight": "balanced",
+          "max_depth": null,
+          "n_estimators": 400
+        },
+        "statement": "A larger random forest with balanced class weights beats the default-config forest on attack detection."
+      },
+      "kept": true,
+      "verdict": {
+        "accepted": true,
+        "beats_stated_baseline": true,
+        "checks": [
+          {
+            "check": "split_provenance",
+            "detail": "run validation indices == frozen validation indices",
+            "passed": true
+          },
+          {
+            "check": "feature_provenance",
+            "detail": "features_used within the registered feature set",
+            "passed": true
+          },
+          {
+            "check": "metric_recomputation",
+            "detail": "recomputed mean F1 vs self-reported mean F1 (0.993004) within tolerance",
+            "passed": true
+          },
+          {
+            "check": "train_test_overlap",
+            "detail": "0 exact duplicate rows shared by train/validation",
+            "passed": true
+          },
+          {
+            "check": "target_leakage",
+            "detail": "no feature above the solo-AUC threshold",
+            "passed": true
+          },
+          {
+            "check": "seed_discipline",
+            "detail": "3 seed runs recomputed (need >= 3)",
+            "passed": true
+          },
+          {
+            "check": "dumb_baseline_gate",
+            "detail": "verified mean F1 0.9930 vs dumb baseline 0.0000",
+            "passed": true
+          }
+        ],
+        "dumb_baseline_f1": 0.0,
+        "failures": [],
+        "per_seed_f1": [
+          0.993183,
+          0.992126,
+          0.993704
+        ],
+        "stated_baseline_f1": 0.991588,
+        "verified_mean_f1": 0.993004,
+        "verified_std_f1": 0.000657
+      }
+    },
+    {
+      "agent_id": "agent_booster",
+      "bid": {
+        "agent_id": "agent_booster",
+        "compute_estimate": 36.0,
+        "confidence": 0.85,
+        "fee": 26.4,
+        "price": 62.4,
+        "score": 0.56
+      },
+      "compute_credits": 0.5527,
+      "hypothesis": {
+        "falsifier": "Verified mean validation F1 does not exceed the stated baseline.",
+        "family": "gradient_boosting",
+        "id": "H2",
+        "params": {
+          "learning_rate": 0.08,
+          "max_depth": null,
+          "max_iter": 300
+        },
+        "statement": "Histogram gradient boosting (300 rounds, lr 0.08) beats the stated baseline by fitting attack boundaries the forest smooths over."
+      },
+      "kept": true,
+      "verdict": {
+        "accepted": true,
+        "beats_stated_baseline": true,
+        "checks": [
+          {
+            "check": "split_provenance",
+            "detail": "run validation indices == frozen validation indices",
+            "passed": true
+          },
+          {
+            "check": "feature_provenance",
+            "detail": "features_used within the registered feature set",
+            "passed": true
+          },
+          {
+            "check": "metric_recomputation",
+            "detail": "recomputed mean F1 vs self-reported mean F1 (0.995816) within tolerance",
+            "passed": true
+          },
+          {
+            "check": "train_test_overlap",
+            "detail": "0 exact duplicate rows shared by train/validation",
+            "passed": true
+          },
+          {
+            "check": "target_leakage",
+            "detail": "no feature above the solo-AUC threshold",
+            "passed": true
+          },
+          {
+            "check": "seed_discipline",
+            "detail": "3 seed runs recomputed (need >= 3)",
+            "passed": true
+          },
+          {
+            "check": "dumb_baseline_gate",
+            "detail": "verified mean F1 0.9958 vs dumb baseline 0.0000",
+            "passed": true
+          }
+        ],
+        "dumb_baseline_f1": 0.0,
+        "failures": [],
+        "per_seed_f1": [
+          0.995816,
+          0.995816,
+          0.995816
+        ],
+        "stated_baseline_f1": 0.991588,
+        "verified_mean_f1": 0.995816,
+        "verified_std_f1": 0.0
+      }
+    },
+    {
+      "agent_id": "agent_weaver",
+      "bid": {
+        "agent_id": "agent_weaver",
+        "compute_estimate": 36.0,
+        "confidence": 0.85,
+        "fee": 26.4,
+        "price": 62.4,
+        "score": 0.56
+      },
+      "compute_credits": 0.9622,
+      "hypothesis": {
+        "falsifier": "Verified mean validation F1 does not exceed the stated baseline.",
+        "family": "mlp",
+        "id": "H3",
+        "params": {
+          "alpha": 0.001,
+          "hidden": [
+            128,
+            64
+          ],
+          "max_iter": 300
+        },
+        "statement": "A small MLP (128-64) on standardised features beats the stated baseline by learning feature interactions trees miss."
+      },
+      "kept": false,
+      "verdict": {
+        "accepted": true,
+        "beats_stated_baseline": false,
+        "checks": [
+          {
+            "check": "split_provenance",
+            "detail": "run validation indices == frozen validation indices",
+            "passed": true
+          },
+          {
+            "check": "feature_provenance",
+            "detail": "features_used within the registered feature set",
+            "passed": true
+          },
+          {
+            "check": "metric_recomputation",
+            "detail": "recomputed mean F1 vs self-reported mean F1 (0.991426) within tolerance",
+            "passed": true
+          },
+          {
+            "check": "train_test_overlap",
+            "detail": "0 exact duplicate rows shared by train/validation",
+            "passed": true
+          },
+          {
+            "check": "target_leakage",
+            "detail": "no feature above the solo-AUC threshold",
+            "passed": true
+          },
+          {
+            "check": "seed_discipline",
+            "detail": "3 seed runs recomputed (need >= 3)",
+            "passed": true
+          },
+          {
+            "check": "dumb_baseline_gate",
+            "detail": "verified mean F1 0.9914 vs dumb baseline 0.0000",
+            "passed": true
+          }
+        ],
+        "dumb_baseline_f1": 0.0,
+        "failures": [],
+        "per_seed_f1": [
+          0.991597,
+          0.991076,
+          0.991605
+        ],
+        "stated_baseline_f1": 0.991588,
+        "verified_mean_f1": 0.991426,
+        "verified_std_f1": 0.000247
+      }
+    }
+  ],
+  "total_spent_credits": 54.7027
+}

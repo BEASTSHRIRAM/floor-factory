@@ -1,0 +1,38 @@
+{
+  "campaign_budget_credits": 600.0,
+  "campaign_id": "campaign-001",
+  "dataset": {
+    "features": 67,
+    "positive_rate": 0.5,
+    "rows": 20000,
+    "source": "CICIDS2017 sample (Kaggle: sweety18/cicids2017-full-dataset), prepared by ml_factory/prepare_cicids.py",
+    "task": "binary classification: attack (1) vs BENIGN (0)"
+  },
+  "dumb_baseline_f1": 0.0,
+  "duplicates_removed_at_freeze": 5451,
+  "goal": "binary classification: attack (1) vs BENIGN (0)",
+  "holdout_policy": "holdout is not mounted in any experiment; scored exactly once, by Evaluation, at campaign close",
+  "leakage_auc_threshold": 0.98,
+  "metric": {
+    "definition": "binary F1 on the positive class, recomputed by Evaluation from raw predictions; campaign metric is the mean over >= 3 seeds",
+    "direction": "higher_is_better",
+    "name": "f1"
+  },
+  "per_experiment_cap_credits": 120.0,
+  "rate_card": {
+    "cpu_credit_per_minute": 1.0,
+    "note": "local CPU sandbox, priced nominally so compute burn is visible in the same units as wages"
+  },
+  "signed_by": "human (charter layer)",
+  "split_hash": "7572572fa0b8976343626ec465efc4824a68f553e306a1377c165b91b1b75f90",
+  "stated_baseline": {
+    "description": "default-config random forest (scikit-learn defaults)",
+    "family": "random_forest",
+    "params": {
+      "class_weight": null,
+      "max_depth": null,
+      "n_estimators": 100
+    },
+    "verified_validation_f1": 0.991588
+  }
+}
