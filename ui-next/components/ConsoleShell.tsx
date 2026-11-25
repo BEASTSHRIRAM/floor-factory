@@ -23,6 +23,7 @@ import {
   ChevronsRight,
   ContactRound,
   Factory,
+  FlaskConical,
   LogOut,
   Plug,
   UserPlus,
@@ -88,6 +89,12 @@ const NAV: {
     label: "Hire",
     icon: UserPlus,
     match: (p) => p.startsWith("/console/hire"),
+  },
+  {
+    href: "/console/ml-factory",
+    label: "ML Factory",
+    icon: FlaskConical,
+    match: (p) => p.startsWith("/console/ml-factory"),
   },
   {
     href: "/console/profile",

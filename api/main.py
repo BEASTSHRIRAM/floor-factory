@@ -128,6 +128,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ML Factory (sibling factory): read-only campaign artefacts for the
+# console. Guarded — the floor API must never fail to start because
+# the ML Factory module is absent.
+try:
+    try:
+        from api.ml_factory_routes import router as _ml_factory_router
+    except ImportError:
+        from ml_factory_routes import router as _ml_factory_router
+    app.include_router(_ml_factory_router)
+except Exception:  # noqa: BLE001
+    pass
+
 _shift_lock = threading.Lock()
 _shift_state: dict = {"running": False, "last_summary": None, "last_error": None}
 
