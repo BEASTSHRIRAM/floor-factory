@@ -185,22 +185,9 @@ export default function FloorShell(props: {
 
   return (
     <div className="ao-root flex h-dvh w-full overflow-hidden bg-background font-sans text-foreground">
-      {/* ── Left rail: brand, roster, totals (their Sidebar structure) ── */}
+      {/* ── Left rail: roster, totals (their Sidebar structure; brand lives in the app shell) ── */}
       <aside className="flex w-[280px] shrink-0 flex-col border-r border-border bg-sidebar" aria-label="Agent roster">
-        <div className="flex items-center gap-2.5 px-4 pb-2 pt-4">
-          <Mascot state={props.mascotState} size={36} />
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-semibold leading-tight text-foreground">THE FLOOR</span>
-            <span className="block truncate text-2xs leading-tight text-muted-foreground">Software factory · Synapse MCP</span>
-          </span>
-          <span
-            className={`ml-auto size-2 shrink-0 rounded-full ${demo ? "bg-status-needs-you animate-status-pulse" : connected ? "bg-status-working" : "bg-passive"}`}
-            title={demo ? "Recorded demo" : connected ? "Live" : "Offline"}
-            aria-hidden="true"
-          />
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto pb-2">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-2 pt-1">
           <RosterGroup
             title="Management"
             agents={props.management}
