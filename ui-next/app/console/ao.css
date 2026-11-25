@@ -1848,3 +1848,38 @@
 		box-shadow: none;
 	}
 }
+
+/* ── THE FLOOR overrides: board-card overflow guards ─────────────
+   The vendored SessionCardView sizes its status row as
+   grid-cols-[minmax(0,1fr)_auto], where the auto track holds the
+   metrics cluster (usage · updated-at) styled shrink-0 +
+   whitespace-nowrap. When the board is squeezed (roster rail +
+   inspector + collapsed app sidebar on a ≤1280px window), a column
+   narrows to ~125px, the auto track keeps the cluster at max-content
+   and it paints several px past the card's right border. The vendored
+   view stays unmodified; these rules keep every card surface
+   self-contained:
+   1. a card clips at its own border — nothing inside can paint out;
+   2. the metrics cell may shrink, and its time text ellipsizes
+      instead of pushing out;
+   3. at xl the board grid keeps a floor width (the vendored
+      xl:min-w-0 otherwise lets the four columns crush), so cards
+      stay readable and the board scrolls sideways instead. */
+[data-testid="board-session-card"] {
+	overflow: hidden;
+}
+[data-testid="board-session-card"] > .grid > :nth-child(2) {
+	min-width: 0;
+	overflow: hidden;
+}
+[data-testid="board-session-card"] > .grid > :nth-child(2) > :last-child {
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+@media (min-width: 1280px) {
+	[data-testid="board-horizontal-scroll"] > div {
+		min-width: 60rem;
+	}
+}
